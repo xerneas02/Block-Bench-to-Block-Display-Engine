@@ -63,33 +63,27 @@ class SmartCubeConversionStrategy(ConversionStrategy):
             print(f"Warning: invalid dimensions for element {info['name']}")
             return []
         
-        print(f"\n=== Conversion SMART avec subdivision texture pour {info['name']} ===")
+        print(f"\n### Conversion SMART avec subdivision texture pour {info['name']} ###")
         print(f"Forme originale: {info['width']}x{info['height']}x{info['depth']}")
         
-        # Utiliser l'optimiseur intelligent pour la division
         cube_divisions = self.smart_optimizer.calculate_optimal_3d_decomposition(
             info['width'], info['height'], info['depth'], element, source_texture_size
         )
         
-        # Subdiviser les textures selon la méthode disponible
         cube_textures = []
         if all_textures is not None:
-            # Nouvelle méthode avec textures individuelles
             print("🎨 Subdivision de texture avec textures individuelles")
             cube_textures = self.texture_subdivider.subdivide_texture_for_cubes_with_individual_textures(
                 element, cube_divisions, all_textures
             )
         elif source_texture and len(cube_divisions) > 1:
-            # Ancienne méthode avec texture unique
             print("🎨 Subdivision de texture pour multiples cubes")
             cube_textures = self.texture_subdivider.subdivide_texture_for_cubes(
                 source_texture, element, cube_divisions
             )
         else:
-            # Utiliser la texture unique pour tous les cubes
             cube_textures = [texture] * len(cube_divisions)
         
-        # Créer les têtes avec leurs textures individuelles et rotation correcte
         heads = []
         for i, division in enumerate(cube_divisions):
             print(f"  Cube {i+1}: pos=({division['position'][0]:.1f}, {division['position'][1]:.1f}, {division['position'][2]:.1f}), size=({division['size'][0]}x{division['size'][1]}x{division['size'][2]})")
@@ -100,14 +94,11 @@ class SmartCubeConversionStrategy(ConversionStrategy):
                 stretch = division['stretch_info']
                 print(f"    → Étirement contrôlé: {stretch['x_stretch']}x{stretch['y_stretch']}x{stretch['z_stretch']}")
             
-            # Utiliser la texture spécifique à ce cube
             current_texture = cube_textures[i] if i < len(cube_textures) and cube_textures[i] else texture
             if current_texture != texture and current_texture is not None:
                 print(f"    → Texture subdivisée appliquée")
             
-            # NOUVEAU: Créer la tête avec rotation au niveau de l'élément
             if info['rotation'] != [0, 0, 0]:
-                # Utiliser la nouvelle méthode pour les éléments avec rotation
                 element_origin = element.get('origin', [info['bottom_x'] + info['width']/2, 
                                                        info['bottom_y'], 
                                                        info['bottom_z'] + info['depth']/2])
@@ -119,7 +110,6 @@ class SmartCubeConversionStrategy(ConversionStrategy):
                     info['rotation'], element_origin, model_center, current_texture
                 )
             else:
-                # Méthode classique pour les éléments sans rotation
                 cube_x = info['bottom_x'] + division['position'][0]
                 cube_y = info['bottom_y'] + division['position'][1]
                 cube_z = info['bottom_z'] + division['position'][2]
@@ -130,7 +120,6 @@ class SmartCubeConversionStrategy(ConversionStrategy):
                     model_center, info['rotation'], current_texture
                 )
             
-            # Ajouter des métadonnées
             head["_smart_info"] = {
                 "original_size": (info['width'], info['height'], info['depth']),
                 "cube_info": division,
@@ -142,15 +131,14 @@ class SmartCubeConversionStrategy(ConversionStrategy):
             
             heads.append(head)
         
-        # Vérifier que la forme totale est préservée
         total_volume = sum(d['size'][0] * d['size'][1] * d['size'][2] for d in cube_divisions)
         original_volume = info['width'] * info['height'] * info['depth']
         
-        print(f"=== Vérification: volume original={original_volume:.1f}, volume total={total_volume:.1f} ===")
-        print(f"=== {len(heads)} cubes générés avec textures subdivisées ===\n")
+        print(f"### Vérification: volume original={original_volume:.1f}, volume total={total_volume:.1f} ###")
+        print(f"### {len(heads)} cubes générés avec textures subdivisées ###\n")
         
         return heads
 
-# Alias pour compatibilité
+
 TextureAwareCubeConversionStrategy = SmartCubeConversionStrategy
 CubeConversionStrategy = SmartCubeConversionStrategy

@@ -52,11 +52,9 @@ class ElementAnalyzer:
         if width < 0 or height < 0 or depth < 0:
             return ElementType.INVALID_SHAPE
         
-        # MODIFICATION: Accepter 1 dimension plate comme surface plate normale
         if zero_dimensions == 1:
             return ElementType.FLAT_SURFACE
         
-        # 2 ou 3 dimensions plates = forme dégénérée
         if zero_dimensions >= 2:
             return ElementType.DEGENERATE_SHAPE
         

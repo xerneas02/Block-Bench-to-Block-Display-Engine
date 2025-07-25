@@ -20,9 +20,8 @@ class MathUtils:
         cos_z, sin_z = math.cos(rz), math.sin(rz)
         
         # Blockbench rotation order: Z * X * Y (applied right to left)
-        # Calculer les matrices individuelles
         
-        # Matrice de rotation Y
+        # Matrice rotation Y
         Ry = [
             cos_y, 0, sin_y, 0,
             0, 1, 0, 0,
@@ -30,7 +29,7 @@ class MathUtils:
             0, 0, 0, 1
         ]
         
-        # Matrice de rotation X
+        # Matrice rotation X
         Rx = [
             1, 0, 0, 0,
             0, cos_x, -sin_x, 0,
@@ -38,7 +37,7 @@ class MathUtils:
             0, 0, 0, 1
         ]
         
-        # Matrice de rotation Z
+        # Matrice rotation Z
         Rz = [
             cos_z, -sin_z, 0, 0,
             sin_z, cos_z, 0, 0,
@@ -46,7 +45,7 @@ class MathUtils:
             0, 0, 0, 1
         ]
         
-        # Multiplier dans l'ordre Blockbench: Rz * Rx * Ry
+        # Rz * Rx * Ry
         temp = MathUtils._multiply_matrices_4x4(Rx, Ry)
         final = MathUtils._multiply_matrices_4x4(Rz, temp)
         
@@ -71,10 +70,8 @@ class MathUtils:
         if rotation == [0, 0, 0]:
             return x, y, z
         
-        # Utiliser la matrice de rotation complète
         rotation_matrix = MathUtils.create_rotation_matrix(rotation)
         
-        # Appliquer la transformation
         x_new = rotation_matrix[0] * x + rotation_matrix[1] * y + rotation_matrix[2] * z
         y_new = rotation_matrix[4] * x + rotation_matrix[5] * y + rotation_matrix[6] * z
         z_new = rotation_matrix[8] * x + rotation_matrix[9] * y + rotation_matrix[10] * z
@@ -92,12 +89,10 @@ class CoordinateConverter:
         Converts bottom corner position to BDEngine head position
         Player heads are positioned by the center of their top face
         """
-        # Calculate center of top face from bottom corner
         center_x = bottom_x + width / 2
         center_z = bottom_z + depth / 2
-        top_y = bottom_y + height  # Top face
+        top_y = bottom_y + height 
         
-        # Position normalized relative to model center
         pos_x = (center_x - model_center[0]) / 16
         pos_y = (top_y - model_center[1]) / 16
         pos_z = (center_z - model_center[2]) / 16
@@ -124,9 +119,8 @@ class CoordinateConverter:
             max_y = max(max_y, to_coords[1])
             max_z = max(max_z, to_coords[2])
         
-        # Center X and Z as before, but Y = model base
         center_x = (min_x + max_x) / 2
-        center_y = min_y  # Use minimum Y coordinate as reference
+        center_y = min_y
         center_z = (min_z + max_z) / 2
         
         return [center_x, center_y, center_z]

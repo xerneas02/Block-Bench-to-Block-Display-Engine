@@ -46,43 +46,36 @@ class BBModelConverter:
         )
         print(f"Model center: {model_center}")
         
-        # Extraire TOUTES les textures du modèle
         all_textures = self.texture_manager.extract_all_textures(bbmodel_data)
         
         if not all_textures:
-            print("⚠️ Aucune texture trouvée dans le modèle")
+            print("⚠️ No textures found in the model. Using default texture.")
         
-        # Convert elements with individual texture handling
         total_heads = 0
         elements = bbmodel_data.get("elements", [])
         
-        print(f"\n=== Conversion de {len(elements)} éléments avec textures individuelles ===")
+        print(f"\n### Convertion of {len(elements)} elements to BDEngine heads ###")
         
         for i, element in enumerate(elements):
             element_name = element.get("name", f"element_{i}")
-            print(f"\n--- Élément {i+1}: {element_name} ---")
+            print(f"\n--- Element {i+1}: {element_name} ---")
             
-            # Extraire les IDs de texture pour cet élément
             texture_ids = self.texture_manager.get_element_texture_ids(element)
-            print(f"  Textures utilisées: {texture_ids}")
+            print(f" Texture use: {texture_ids}")
             
-            # Créer la texture spécifique à cet élément
             element_texture = None
             if texture_ids and all_textures:
                 element_texture = self.texture_manager.convert_element_texture_to_head(element, all_textures)
                 if element_texture:
-                    print(f"  ✅ Texture générée pour l'élément")
+                    print(f"  ✅ Texture generated for element: {element_texture}")
                 else:
-                    print(f"  ⚠️ Échec génération texture pour l'élément")
-            
-            # Convertir l'élément selon la stratégie
+                    print(f"  ⚠️ Error generating texture for element: {element_name}")
+
             if isinstance(self.strategy, SmartCubeConversionStrategy):
-                # Mode cube intelligent avec textures individuelles
                 converted_heads = self.strategy.convert_element(
-                    element, model_center, element_texture, None, None, all_textures  # Ordre correct des paramètres
+                    element, model_center, element_texture, None, None, all_textures
                 )
             else:
-                # Mode stretch classique
                 converted_heads = self.strategy.convert_element(element, model_center, element_texture)
             
             bdengine_structure["children"].extend(converted_heads)
@@ -92,7 +85,7 @@ class BBModelConverter:
             if rotation != [0, 0, 0]:
                 print(f"Element '{element_name}' with rotation: {rotation}")
         
-        print(f"\n=== Conversion terminée: {len(elements)} éléments → {total_heads} têtes ===")
+        print(f"\n### Conversion successfull : {len(elements)} elements → {total_heads} heads ###")
         
         output_file = self._save_bdengine_file(bdengine_structure, bbmodel_file, output_file)
         

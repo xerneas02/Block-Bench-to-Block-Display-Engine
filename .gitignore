@@ -1,3 +1,4 @@
 *.bdengine
 *.bbmodel
 decoded_bdengine/
+*.pyc
