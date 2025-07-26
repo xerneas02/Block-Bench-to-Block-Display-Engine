@@ -18,7 +18,7 @@ class UserInterface:
         print("=== BBModel to BDEngine Converter ===")
         print()
         
-        mode = self._select_conversion_mode()
+        mode = "cube"
         self.converter.set_conversion_mode(mode)
         
         bbmodel_file = self._select_bbmodel_file()
@@ -36,29 +36,6 @@ class UserInterface:
                 print(f"❌ Conversion error: {e}")
         else:
             print("No file selected.")
-    
-    def _select_conversion_mode(self) -> str:
-        """Allows user to select conversion mode"""
-        
-        print("Choose conversion mode:")
-        modes = list(self.config.CONVERSION_MODES.keys())
-        
-        for i, (mode, description) in enumerate(self.config.CONVERSION_MODES.items(), 1):
-            print(f"{i}. {mode.capitalize()} mode - {description}")
-        
-        print()
-        
-        while True:
-            try:
-                choice = input("Enter your choice (1 or 2): ").strip()
-                choice_idx = int(choice) - 1
-                
-                if 0 <= choice_idx < len(modes):
-                    return modes[choice_idx]
-                else:
-                    print("Invalid choice. Please enter 1 or 2.")
-            except ValueError:
-                print("Please enter a valid number.")
     
     def _select_bbmodel_file(self) -> str:
         """Allows user to select .bbmodel file"""

@@ -19,6 +19,9 @@ class MultiTextureManager:
         
         print(f"### Extraction of {len(textures)} textures ###")
         
+        # Find the first texture to use as default (ID 0)
+        default_texture = None
+        
         for texture_data in textures:
             texture_id = texture_data.get("id")
             texture_name = texture_data.get("name", f"texture_{texture_id}")
@@ -28,16 +31,26 @@ class MultiTextureManager:
             
             try:
                 texture_id = int(texture_id)
+                texture_image = self._extract_texture_image(texture_data)
+                
+                if texture_image:
+                    extracted_textures[texture_id] = texture_image
+                    print(f"  Texture {texture_id} ({texture_name}): {texture_image.size}")
+                    
+                    # Store first texture as default
+                    if default_texture is None:
+                        default_texture = texture_image
+                else:
+                    print(f"  Error extracting texture {texture_id} ({texture_name})")
+                    
             except (ValueError, TypeError):
                 print(f"ID of invalid texture: {texture_id}")
                 continue
-            
-            texture_image = self._extract_texture_image(texture_data)
-            if texture_image:
-                extracted_textures[texture_id] = texture_image
-                print(f"  Texture {texture_id} ({texture_name}): {texture_image.size}")
-            else:
-                print(f"  Error extracting texture {texture_id} ({texture_name})")
+        
+        # Add the default texture as ID 0 if needed
+        if default_texture and 0 not in extracted_textures:
+            extracted_textures[0] = default_texture
+            print("  Added first texture as default (ID 0)")
         
         print(f"### {len(extracted_textures)} textures extracted successfully ###")
         return extracted_textures
@@ -66,7 +79,6 @@ class MultiTextureManager:
     
     def get_element_texture_ids(self, element: Dict[str, Any]) -> List[int]:
         """Get unique texture IDs used by an element's faces"""
-        
         texture_ids = set()
         faces = element.get("faces", {})
         
@@ -74,7 +86,11 @@ class MultiTextureManager:
             texture_id = face_data.get("texture")
             if texture_id is not None:
                 try:
-                    texture_id = int(texture_id)
+                    # Add this check for ID 0
+                    texture_id = int(texture_id) 
+                    if texture_id == 0 and 1 in self.textures_cache:
+                        # Map texture 0 to first texture if present
+                        texture_id = 1
                     texture_ids.add(texture_id)
                 except (ValueError, TypeError):
                     pass
@@ -109,7 +125,7 @@ class MultiTextureManager:
         if not faces:
             return None
         
-        uv_regions = {} 
+        uv_regions = {}
         
         for face_name, face_data in faces.items():
             texture_id = face_data.get("texture")
@@ -118,6 +134,9 @@ class MultiTextureManager:
             
             try:
                 texture_id = int(texture_id)
+                # Map texture ID 0 to first available texture if needed
+                if texture_id == 0 and 0 not in all_textures and len(all_textures) > 0:
+                    texture_id = min(all_textures.keys())
             except (ValueError, TypeError):
                 continue
             
@@ -125,6 +144,10 @@ class MultiTextureManager:
                 continue
             
             uv = face_data.get("uv", [0, 0, 16, 16])
+            if len(uv) != 4:
+                continue
+                
+            left, top, right, bottom = uv
             
             if left > right:
                 left, right = right, left
@@ -270,3 +293,18 @@ class MultiTextureManager:
         except Exception as e:
             print(f"Error converting texture element: {e}")
             return None
+
+    def validate_texture(self, texture: Image.Image) -> bool:
+        """Validate texture dimensions and format"""
+        # Check power of 2 dimensions
+        if not (texture.width & (texture.width - 1) == 0) or \
+           not (texture.height & (texture.height - 1) == 0):
+            print(f"Warning: Texture dimensions ({texture.width}x{texture.height}) are not power of 2")
+            return False
+            
+        # Check maximum size
+        if texture.width > 1024 or texture.height > 1024:
+            print("Warning: Texture exceeds maximum size of 1024x1024")
+            return False
+            
+        return True

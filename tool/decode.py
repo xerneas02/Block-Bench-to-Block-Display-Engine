@@ -69,7 +69,7 @@ def save_decoded_data(data, data_type, original_file_path):
     
     return output_file
 
-file_path = "color_block_rot.bdengine"
+file_path = "CuteCreeper.bdengine"
 result, data_type = decode_bdengine_file(file_path)
 
 if result:
