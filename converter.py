@@ -69,31 +69,36 @@ class BBModelConverter:
         total_heads = 0
         elements = bbmodel_data.get("elements", [])
         
-        print(f"\n### Convertion of {len(elements)} elements to BDEngine heads ###")
+        # Filter out locator elements
+        valid_elements = []
+        for element in elements:
+            if element.get("type", "cube") != "locator":
+                valid_elements.append(element)
+            else:
+                print(f"Skipping locator element: {element.get('name', 'unnamed')}")
         
-        for i, element in enumerate(elements):
+        print(f"\n### Converting {len(valid_elements)} elements to BDEngine heads (skipped {len(elements) - len(valid_elements)} locators) ###")
+        
+        for i, element in enumerate(valid_elements):
             element_name = element.get("name", f"element_{i}")
             print(f"\n--- Element {i+1}: {element_name} ---")
             
             # Convert the element
             converted_heads = self._convert_element_with_textures(element, model_center, all_textures)
             
-            # Find parent group
+            # Handle group assignment
             if self.group_mapping:
                 parent_group = self._find_parent_group(element.get("uuid"))
                 if parent_group:
-                    # Add to parent group
                     parent_group["children"].extend(converted_heads)
                 else:
-                    # Add to root if no group found
                     bdengine_structure["children"].extend(converted_heads)
             else:
-                # No groups - add to root
                 bdengine_structure["children"].extend(converted_heads)
             
             total_heads += len(converted_heads)
-        
-        print(f"\n### Conversion successfull : {len(elements)} elements → {total_heads} heads ###")
+
+        print(f"\n### Conversion successful: {len(valid_elements)} elements → {total_heads} heads ###")
         
         output_file = self._save_bdengine_file(bdengine_structure, bbmodel_file, output_file)
         
@@ -116,7 +121,7 @@ class BBModelConverter:
         return structure
 
     def _create_group_hierarchy(self, groups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Recursively creates nested group structure"""
+        """Recursively creates nested group structure, ignoring locators"""
         result = []
         
         for group in groups:
@@ -141,11 +146,16 @@ class BBModelConverter:
             if "children" in group:
                 for child in group["children"]:
                     if isinstance(child, dict):
+                        # Skip locator type elements
+                        if child.get("type") == "locator":
+                            print(f"Skipping locator in group {group.get('name')}: {child.get('name', 'unnamed')}")
+                            continue
                         # Nested group
                         nested_groups = self._create_group_hierarchy([child])
                         group_struct["children"].extend(nested_groups)
                     else:
-                        # UUID reference to element, store for later
+                        # UUID reference to element, store for later if not a locator
+                        # We'll check the type when processing elements
                         self.group_mapping[child] = group_struct
                         
             result.append(group_struct)
