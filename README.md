@@ -105,6 +105,4 @@ If you find bugs, want to improve the conversion accuracy, or add new features, 
 
 ## 🧪 Status
 
-This project is under **active development** and not yet production-ready.
-
-Use with caution and always verify the output in a test environment.
+This project is under **active development**.
