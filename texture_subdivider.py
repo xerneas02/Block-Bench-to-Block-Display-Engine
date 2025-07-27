@@ -241,8 +241,8 @@ class TextureSubdivider:
 
         final_left = max(0, int(new_left))
         final_top = max(0, int(new_top))
-        final_right = min(source_texture.width, int(new_right))
-        final_bottom = min(source_texture.height, int(new_bottom))
+        final_right = min(source_texture.width, max(final_left + 1, int(round(new_right))))
+        final_bottom = min(source_texture.height, max(final_top + 1, int(round(new_bottom))))
 
         if final_right <= final_left or final_bottom <= final_top:
             print(f"      Invalid region: ({final_left}, {final_top}, {final_right}, {final_bottom})")
@@ -601,8 +601,8 @@ class TextureSubdivider:
 
         final_left = max(0, int(new_left))
         final_top = max(0, int(new_top))
-        final_right = min(source_texture.width, int(new_right))
-        final_bottom = min(source_texture.height, int(new_bottom))
+        final_right = min(source_texture.width, max(final_left + 1, int(round(new_right))))
+        final_bottom = min(source_texture.height, max(final_top + 1, int(round(new_bottom))))
 
         if final_right <= final_left or final_bottom <= final_top:
             print(f"      Invalid region: ({final_left}, {final_top}, {final_right}, {final_bottom})")
@@ -963,8 +963,8 @@ class TextureSubdivider:
 
         final_left = max(0, int(new_left))
         final_top = max(0, int(new_top))
-        final_right = min(source_texture.width, int(new_right))
-        final_bottom = min(source_texture.height, int(new_bottom))
+        final_right = min(source_texture.width, max(final_left + 1, int(round(new_right))))
+        final_bottom = min(source_texture.height, max(final_top + 1, int(round(new_bottom))))
 
         if final_right <= final_left or final_bottom <= final_top:
             print(f"      Invalid region: ({final_left}, {final_top}, {final_right}, {final_bottom})")
@@ -1323,8 +1323,8 @@ class TextureSubdivider:
 
         final_left = max(0, int(new_left))
         final_top = max(0, int(new_top))
-        final_right = min(source_texture.width, int(new_right))
-        final_bottom = min(source_texture.height, int(new_bottom))
+        final_right = min(source_texture.width, max(final_left + 1, int(round(new_right))))
+        final_bottom = min(source_texture.height, max(final_top + 1, int(round(new_bottom))))
 
         if final_right <= final_left or final_bottom <= final_top:
             print(f"      Invalid region: ({final_left}, {final_top}, {final_right}, {final_bottom})")
