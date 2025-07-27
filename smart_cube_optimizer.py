@@ -14,7 +14,7 @@ class SmartCubeOptimizer:
         self.flat_thickness = 0.011
     
     def analyze_dimension(self, dimension: float) -> Dict[str, Any]:
-        """Analyse a dimension and return decomposition strategy"""
+        """Analyze a dimension and return decomposition strategy"""
         
         if dimension == 0:
             return {
@@ -74,140 +74,37 @@ class SmartCubeOptimizer:
     
     def _handle_flat_surface(self, width: float, height: float, depth: float, 
                            flat_dimensions: List[str], element: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Handle flat surfaces by converting 0 dimensions to 0.011"""
-
+        """Handle flat surfaces by converting 0 dimensions to minimum thickness"""
         converted_width = self.flat_thickness if width == 0 else width
         converted_height = self.flat_thickness if height == 0 else height  
         converted_depth = self.flat_thickness if depth == 0 else depth
-        
-        print(f"🔷 Converting flat surface: {width}x{height}x{depth} → {converted_width}x{converted_height}x{converted_depth}")
 
-        non_flat_dimensions = []
-        if width > 0:
-            non_flat_dimensions.append(('width', width))
-        if height > 0:
-            non_flat_dimensions.append(('height', height))
-        if depth > 0:
-            non_flat_dimensions.append(('depth', depth))
-        
-        if len(non_flat_dimensions) == 0:
-            print("🔷 Degenerate point - creating minimal cube")
-            return [{
-                "position": (0, 0, 0),
-                "size": (self.flat_thickness, self.flat_thickness, self.flat_thickness),
-                "is_perfect_cube": True,
-                "is_flat_surface": True,
-                "flat_dimensions": flat_dimensions,
-                "original_size": (width, height, depth),
-                "source_element": element
-            }]
-        
-        elif len(non_flat_dimensions) == 1:
-            dim_name, dim_value = non_flat_dimensions[0]
-            print(f"🔷 Line detected - subdividing along {dim_name} ({dim_value})")
-
-            dim_analysis = self.analyze_dimension(dim_value)
-            divisions = self._get_divisions_from_analysis(dim_analysis, dim_value)
-            
-            cubes = []
-            position = 0
-            for division_size in divisions:
-                if dim_name == 'width':
-                    cube_size = (division_size, converted_height, converted_depth)
-                    cube_pos = (position, 0, 0)
-                elif dim_name == 'height':
-                    cube_size = (converted_width, division_size, converted_depth)
-                    cube_pos = (0, position, 0)
-                else:
-                    cube_size = (converted_width, converted_height, division_size)
-                    cube_pos = (0, 0, position)
-                
-                cubes.append({
-                    "position": cube_pos,
-                    "size": cube_size,
-                    "is_perfect_cube": False,
-                    "is_flat_surface": True,
-                    "flat_dimensions": flat_dimensions,
-                    "original_size": (width, height, depth),
-                    "source_element": element
-                })
-                
-                position += division_size
-            
-            return cubes
-        
-        else:
-            print(f"🔷 2D Surface detected - 2D subdivision")
-
-            dim1_name, dim1_value = non_flat_dimensions[0]
-            dim2_name, dim2_value = non_flat_dimensions[1]
-
-            dim1_analysis = self.analyze_dimension(dim1_value)
-            dim2_analysis = self.analyze_dimension(dim2_value)
-            
-            dim1_divisions = self._get_divisions_from_analysis(dim1_analysis, dim1_value)
-            dim2_divisions = self._get_divisions_from_analysis(dim2_analysis, dim2_value)
-            
-            print(f"🔷 Divisions {dim1_name}: {dim1_divisions}")
-            print(f"🔷 Divisions {dim2_name}: {dim2_divisions}")
-
-            cubes = []
-            
-            pos1 = 0
-            for div1 in dim1_divisions:
-                pos2 = 0
-                for div2 in dim2_divisions:
-                    if 'width' in flat_dimensions:
-                        if dim1_name == 'height':
-                            cube_pos = (0, pos1, pos2)
-                            cube_size = (converted_width, div1, div2)
-                        else:
-                            cube_pos = (0, pos2, pos1)
-                            cube_size = (converted_width, div2, div1)
-                    elif 'height' in flat_dimensions:
-                        if dim1_name == 'width':
-                            cube_pos = (pos1, 0, pos2)
-                            cube_size = (div1, converted_height, div2)
-                        else:
-                            cube_pos = (pos2, 0, pos1)
-                            cube_size = (div2, converted_height, div1)
-                    else:
-                        if dim1_name == 'width':
-                            cube_pos = (pos1, pos2, 0)
-                            cube_size = (div1, div2, converted_depth)
-                        else: 
-                            cube_pos = (pos2, pos1, 0)
-                            cube_size = (div2, div1, converted_depth)
-                    
-                    cubes.append({
-                        "position": cube_pos,
-                        "size": cube_size,
-                        "is_perfect_cube": False,
-                        "is_flat_surface": True,
-                        "flat_dimensions": flat_dimensions,
-                        "original_size": (width, height, depth),
-                        "source_element": element
-                    })
-                    
-                    pos2 += div2
-                pos1 += div1
-            
-            return cubes
+        return [{
+            "position": (0, 0, 0),
+            "size": (converted_width, converted_height, converted_depth),
+            "is_perfect_cube": False,
+            "is_flat_surface": True,
+            "flat_dimensions": flat_dimensions,
+            "original_size": (width, height, depth),
+            "source_element": element,
+            "requires_texture": True
+        }]
     
     def _get_divisions_from_analysis(self, analysis: Dict[str, Any], dimension: float) -> List[float]:
-        """Extrait les divisions d'une analyse de dimension"""
-        
-        if analysis['method'] == 'exact_cubes':
+        """Extract divisions from dimension analysis"""
+        if analysis['method'] == 'flat_surface':
+            return [analysis['bdengine_size']]
+        elif analysis['method'] == 'exact_cubes':
             return analysis['decomposition']
         elif analysis['method'] == 'single_stretch':
             return [analysis['final_size']]
         elif analysis['method'] == 'multiple_stretch':
             return [analysis['cube_size']] * analysis['num_cubes']
-        else:
-            return [dimension]
+        
+        return [max(dimension, 1.0)] if dimension > 0 else [1.0]
     
     def _find_exact_cube_decomposition(self, dimension: float) -> Dict[str, Any]:
-        """Trouve une décomposition exacte avec des cubes de tailles standard"""
+        """Find exact decomposition using standard cube sizes"""
         
         remaining = int(dimension)
         cubes = []
@@ -227,7 +124,7 @@ class SmartCubeOptimizer:
         }
     
     def _find_controlled_stretch_decomposition(self, dimension: float) -> Dict[str, Any]:
-        """Trouve une décomposition avec étirement contrôlé pour garder des pixels carrés"""
+        """Find decomposition with controlled stretching to maintain square pixels"""
         
         original_dim = int(dimension)
         
