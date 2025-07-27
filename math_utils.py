@@ -1,6 +1,7 @@
 """Math utilities for conversions"""
 
 import math
+import numpy as np
 from typing import List, Tuple
 
 class MathUtils:
@@ -20,48 +21,31 @@ class MathUtils:
         cos_z, sin_z = math.cos(rz), math.sin(rz)
         
         # Blockbench rotation order: Z * X * Y (applied right to left)
+
+        Ry = np.array([
+            [cos_y, 0, sin_y, 0],
+            [0, 1, 0, 0],
+            [-sin_y, 0, cos_y, 0],
+            [0, 0, 0, 1]
+        ])
         
-        # Matrice rotation Y
-        Ry = [
-            cos_y, 0, sin_y, 0,
-            0, 1, 0, 0,
-            -sin_y, 0, cos_y, 0,
-            0, 0, 0, 1
-        ]
+        Rx = np.array([
+            [1, 0, 0, 0],
+            [0, cos_x, -sin_x, 0],
+            [0, sin_x, cos_x, 0],
+            [0, 0, 0, 1]
+        ])
         
-        # Matrice rotation X
-        Rx = [
-            1, 0, 0, 0,
-            0, cos_x, -sin_x, 0,
-            0, sin_x, cos_x, 0,
-            0, 0, 0, 1
-        ]
+        Rz = np.array([
+            [cos_z, -sin_z, 0, 0],
+            [sin_z, cos_z, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ])
         
-        # Matrice rotation Z
-        Rz = [
-            cos_z, -sin_z, 0, 0,
-            sin_z, cos_z, 0, 0,
-            0, 0, 1, 0,
-            0, 0, 0, 1
-        ]
+        final_matrix = Rz @ Rx @ Ry
         
-        # Rz * Rx * Ry
-        temp = MathUtils._multiply_matrices_4x4(Rx, Ry)
-        final = MathUtils._multiply_matrices_4x4(Rz, temp)
-        
-        return final
-    
-    @staticmethod
-    def _multiply_matrices_4x4(a: List[float], b: List[float]) -> List[float]:
-        """Multiplie deux matrices 4x4 représentées comme des listes"""
-        result = [0] * 16
-        
-        for i in range(4):
-            for j in range(4):
-                for k in range(4):
-                    result[i * 4 + j] += a[i * 4 + k] * b[k * 4 + j]
-        
-        return result
+        return final_matrix.flatten().tolist()
     
     @staticmethod
     def apply_rotation_to_point(x: float, y: float, z: float, rotation: List[float]) -> Tuple[float, float, float]:
@@ -70,13 +54,12 @@ class MathUtils:
         if rotation == [0, 0, 0]:
             return x, y, z
         
-        rotation_matrix = MathUtils.create_rotation_matrix(rotation)
+        rotation_matrix = np.array(MathUtils.create_rotation_matrix(rotation)).reshape(4, 4)
+        point = np.array([x, y, z, 1])
         
-        x_new = rotation_matrix[0] * x + rotation_matrix[1] * y + rotation_matrix[2] * z
-        y_new = rotation_matrix[4] * x + rotation_matrix[5] * y + rotation_matrix[6] * z
-        z_new = rotation_matrix[8] * x + rotation_matrix[9] * y + rotation_matrix[10] * z
+        rotated_point = rotation_matrix @ point
         
-        return x_new, y_new, z_new
+        return rotated_point[0], rotated_point[1], rotated_point[2]
 
 class CoordinateConverter:
     """Coordinate converter"""

@@ -37,8 +37,15 @@ class BBModelConverter:
     
     def convert_file(self, bbmodel_file: str, output_file: str = None, texture_file: str = None) -> str:
         """Converts BBModel file to BDEngine format"""
-        with open(bbmodel_file, 'r', encoding='utf-8') as f:
-            bbmodel_data = json.load(f)
+        try:
+            with open(bbmodel_file, 'r', encoding='utf-8') as f:
+                bbmodel_data = json.load(f)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"BBModel file not found: {bbmodel_file}")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid BBModel file format: {e}")
+        except Exception as e:
+            raise RuntimeError(f"Error reading BBModel file: {e}")
         
         if texture_file and os.path.exists(texture_file):
             try:
@@ -51,13 +58,23 @@ class BBModelConverter:
             except Exception as e:
                 print(f"Error loading external texture: {e}")
         
-        all_textures = self.texture_manager.extract_all_textures(bbmodel_data)
+        try:
+            all_textures = self.texture_manager.extract_all_textures(bbmodel_data)
+        except Exception as e:
+            raise RuntimeError(f"Error extracting textures: {e}")
         
-        bdengine_structure = self._create_bdengine_structure(bbmodel_data)
+        try:
+            bdengine_structure = self._create_bdengine_structure(bbmodel_data)
+        except Exception as e:
+            raise RuntimeError(f"Error creating BDEngine structure: {e}")
         
-        model_center = self.coord_converter.calculate_model_center(
-            bbmodel_data.get("elements", [])
-        )
+        try:
+            model_center = self.coord_converter.calculate_model_center(
+                bbmodel_data.get("elements", [])
+            )
+        except Exception as e:
+            raise RuntimeError(f"Error calculating model center: {e}")
+            
         print(f"Model center: {model_center}")
         
         if not all_textures:

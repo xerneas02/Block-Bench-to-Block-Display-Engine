@@ -5,6 +5,74 @@ import io
 from PIL import Image
 from typing import Dict, Any, List, Tuple, Optional
 
+class TextureRect:
+    """Rectangle for bin packing algorithm"""
+    def __init__(self, x: int, y: int, width: int, height: int):
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        
+    def fits(self, width: int, height: int) -> bool:
+        """Check if a texture of given size fits in this rectangle"""
+        return width <= self.width and height <= self.height
+        
+    def split(self, width: int, height: int) -> List['TextureRect']:
+        """Split this rectangle after placing a texture, return remaining rectangles"""
+        remaining = []
+        
+        if self.width > width:
+            remaining.append(TextureRect(
+                self.x + width, self.y, 
+                self.width - width, height
+            ))
+            
+        if self.height > height:
+            remaining.append(TextureRect(
+                self.x, self.y + height,
+                self.width, self.height - height
+            ))
+            
+        if self.width > width and self.height > height:
+            remaining.append(TextureRect(
+                self.x + width, self.y + height,
+                self.width - width, self.height - height
+            ))
+            
+        return remaining
+
+class BinPacker:
+    """Simple bin packing algorithm for texture atlasing"""
+    
+    def __init__(self, width: int, height: int):
+        self.width = width
+        self.height = height
+        self.free_rects = [TextureRect(0, 0, width, height)]
+        self.placements = {}
+        
+    def pack(self, texture_id: int, width: int, height: int) -> Optional[Tuple[int, int]]:
+        """Try to pack a texture, return position if successful"""
+        best_rect = None
+        best_index = -1
+        
+        for i, rect in enumerate(self.free_rects):
+            if rect.fits(width, height):
+                if best_rect is None or (rect.width * rect.height) < (best_rect.width * best_rect.height):
+                    best_rect = rect
+                    best_index = i
+                    
+        if best_rect is None:
+            return None
+            
+        pos_x, pos_y = best_rect.x, best_rect.y
+        self.placements[texture_id] = (pos_x, pos_y, width, height)
+        
+        del self.free_rects[best_index]
+        split_rects = best_rect.split(width, height)
+        self.free_rects.extend(split_rects)
+        
+        return (pos_x, pos_y)
+
 class MultiTextureManager:
     """Handle multiple textures in Blockbench models"""
     
@@ -191,18 +259,16 @@ class MultiTextureManager:
     
     def _create_multi_texture_atlas(self, texture_bounds: Dict[int, Tuple[float, float, float, float]], 
                                    all_textures: Dict[int, Image.Image]) -> Optional[Image.Image]:
-        """Create an atlas texture for multiple textures with bounds"""
+        """Create an atlas texture for multiple textures using bin packing algorithm"""
 
         texture_regions = {}
-        max_region_width = 0
-        max_region_height = 0
+        texture_sizes = []
         
         for texture_id, (min_x, min_y, max_x, max_y) in texture_bounds.items():
             if texture_id not in all_textures:
                 continue
             
             texture = all_textures[texture_id]
-
             pixel_left = max(0, int(min_x))
             pixel_top = max(0, int(min_y))
             pixel_right = min(texture.width, int(max_x))
@@ -211,58 +277,63 @@ class MultiTextureManager:
             if pixel_right > pixel_left and pixel_bottom > pixel_top:
                 region = texture.crop((pixel_left, pixel_top, pixel_right, pixel_bottom))
                 texture_regions[texture_id] = region
-                
-                max_region_width = max(max_region_width, region.width)
-                max_region_height = max(max_region_height, region.height)
-                
+                texture_sizes.append((texture_id, region.width, region.height))
                 print(f"    Region texture {texture_id}: {region.size}")
         
         if not texture_regions:
             print("    No valid texture regions found")
             return None
 
+        texture_sizes.sort(key=lambda x: x[1] * x[2], reverse=True)
+        
+        total_area = sum(w * h for _, w, h in texture_sizes)
+        initial_size = max(64, int((total_area ** 0.5) * 1.2))
+        
+        for atlas_size in [initial_size, initial_size * 2, initial_size * 4]:
+            packer = BinPacker(atlas_size, atlas_size)
+            
+            all_packed = True
+            for texture_id, width, height in texture_sizes:
+                if packer.pack(texture_id, width, height) is None:
+                    all_packed = False
+                    break
+            
+            if all_packed:
+                print(f"    Bin-packed atlas: {atlas_size}x{atlas_size} for {len(texture_sizes)} textures")
+                
+                atlas = Image.new('RGBA', (atlas_size, atlas_size), (0, 0, 0, 0))
+                
+                for texture_id, (x, y, width, height) in packer.placements.items():
+                    region = texture_regions[texture_id]
+                    atlas.paste(region, (x, y))
+                    print(f"      Placed texture {texture_id} at ({x}, {y})")
+                
+                return atlas
+        
+        print("    Bin packing failed, falling back to grid layout")
+        return self._create_grid_atlas(texture_regions)
+        
+    def _create_grid_atlas(self, texture_regions: Dict[int, Image.Image]) -> Image.Image:
+        """Fallback grid-based atlas creation"""
         num_textures = len(texture_regions)
+        max_width = max(region.width for region in texture_regions.values())
+        max_height = max(region.height for region in texture_regions.values())
         
-        if num_textures <= 2:
-            atlas_width = max_region_width * num_textures
-            atlas_height = max_region_height
-            layout = "horizontal"
-        elif num_textures <= 4:
-            cols = 2
-            rows = (num_textures + 1) // 2
-            atlas_width = max_region_width * cols
-            atlas_height = max_region_height * rows
-            layout = "grid"
-        else:
-            side_length = int(num_textures ** 0.5) + 1
-            atlas_width = max_region_width * side_length
-            atlas_height = max_region_height * side_length
-            layout = "square_grid"
+        cols = int(num_textures ** 0.5) + 1
+        rows = (num_textures + cols - 1) // cols
         
-        print(f"    Atlas {layout}: {atlas_width}x{atlas_height} for {num_textures} textures")
+        atlas_width = max_width * cols
+        atlas_height = max_height * rows
         
         atlas = Image.new('RGBA', (atlas_width, atlas_height), (0, 0, 0, 0))
         
-        texture_items = list(texture_regions.items())
-        
-        for i, (texture_id, region) in enumerate(texture_items):
-            if layout == "horizontal":
-                x = i * max_region_width
-                y = 0
-            elif layout == "grid":
-                x = (i % 2) * max_region_width
-                y = (i // 2) * max_region_height
-            else:
-                side_length = int(len(texture_items) ** 0.5) + 1
-                x = (i % side_length) * max_region_width
-                y = (i // side_length) * max_region_height
-            
-            if region.size != (max_region_width, max_region_height):
-                region = region.resize((max_region_width, max_region_height), Image.NEAREST)
-            
+        for i, (texture_id, region) in enumerate(texture_regions.items()):
+            row = i // cols
+            col = i % cols
+            x = col * max_width
+            y = row * max_height
             atlas.paste(region, (x, y))
-            print(f"    Texture {texture_id} placed at ({x}, {y})")
-        
+            
         return atlas
     
     def convert_element_texture_to_head(self, element: Dict[str, Any], 
