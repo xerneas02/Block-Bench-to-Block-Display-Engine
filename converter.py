@@ -33,27 +33,24 @@ class BBModelConverter:
         elif mode == "cube":
             self.strategy = SmartCubeConversionStrategy()
         
-        print(f"Conversion mode set to: {mode} (avec gestionnaire de textures multiples)")
+        print(f"Conversion mode set to: {mode} (with multiple texture manager)")
     
     def convert_file(self, bbmodel_file: str, output_file: str = None, texture_file: str = None) -> str:
         """Converts BBModel file to BDEngine format"""
         with open(bbmodel_file, 'r', encoding='utf-8') as f:
             bbmodel_data = json.load(f)
         
-        # Load external texture if provided
         if texture_file and os.path.exists(texture_file):
             try:
                 external_texture = Image.open(texture_file)
                 if (external_texture.mode != 'RGBA'):
                     external_texture = external_texture.convert('RGBA')
-                # Add as texture ID 0 and 1 to ensure compatibility
                 self.texture_manager.textures_cache[0] = external_texture
                 self.texture_manager.textures_cache[1] = external_texture
                 print(f"Loaded external texture: {texture_file}")
             except Exception as e:
                 print(f"Error loading external texture: {e}")
         
-        # Extract textures from model
         all_textures = self.texture_manager.extract_all_textures(bbmodel_data)
         
         bdengine_structure = self._create_bdengine_structure(bbmodel_data)
@@ -69,7 +66,6 @@ class BBModelConverter:
         total_heads = 0
         elements = bbmodel_data.get("elements", [])
         
-        # Filter out locator elements
         valid_elements = []
         for element in elements:
             if element.get("type", "cube") != "locator":
@@ -83,10 +79,8 @@ class BBModelConverter:
             element_name = element.get("name", f"element_{i}")
             print(f"\n--- Element {i+1}: {element_name} ---")
             
-            # Convert the element
             converted_heads = self._convert_element_with_textures(element, model_center, all_textures)
             
-            # Handle group assignment
             if self.group_mapping:
                 parent_group = self._find_parent_group(element.get("uuid"))
                 if parent_group:
@@ -109,13 +103,10 @@ class BBModelConverter:
         structure = self.config.BDENGINE_BASE_STRUCTURE.copy()
         structure["name"] = bbmodel_data.get("name", "Converted Model")
         
-        # Create groups mapping
         self.group_mapping = {}
         
-        # Process outliner/groups if present 
         outliner = bbmodel_data.get("outliner", [])
         if outliner:
-            # First pass - create all groups
             structure["children"] = self._create_group_hierarchy(outliner)
         
         return structure
@@ -125,6 +116,9 @@ class BBModelConverter:
         result = []
         
         for group in groups:
+            if isinstance(group, str):
+                continue
+                
             group_struct = {
                 "isCollection": True,
                 "isBackCollection": False,
@@ -139,23 +133,18 @@ class BBModelConverter:
                 }
             }
             
-            # Store in mapping
-            self.group_mapping[group["uuid"]] = group_struct
+            if "uuid" in group:
+                self.group_mapping[group["uuid"]] = group_struct
             
-            # Process children recursively
             if "children" in group:
                 for child in group["children"]:
                     if isinstance(child, dict):
-                        # Skip locator type elements
                         if child.get("type") == "locator":
                             print(f"Skipping locator in group {group.get('name')}: {child.get('name', 'unnamed')}")
                             continue
-                        # Nested group
                         nested_groups = self._create_group_hierarchy([child])
                         group_struct["children"].extend(nested_groups)
                     else:
-                        # UUID reference to element, store for later if not a locator
-                        # We'll check the type when processing elements
                         self.group_mapping[child] = group_struct
                         
             result.append(group_struct)

@@ -44,7 +44,7 @@ class SmartCubeOptimizer:
                                          element: Dict[str, Any], source_texture_size: Tuple[int, int] = None) -> List[Dict[str, Any]]:
         """Compute the optimal 3D decomposition of a cube with intelligent handling of flat surfaces and controlled stretching."""
         
-        print(f"\n=== Décomposition intelligente pour {width}x{height}x{depth} ===")
+        print(f"\n=== Smart decomposition for {width}x{height}x{depth} ===")
         
         flat_dimensions = []
         if width == 0:
@@ -55,32 +55,32 @@ class SmartCubeOptimizer:
             flat_dimensions.append('depth')
         
         if flat_dimensions:
-            print(f"🔷 Surface plate détectée: dimensions plates = {flat_dimensions}")
+            print(f"🔷 Flat surface detected: flat dimensions = {flat_dimensions}")
             return self._handle_flat_surface(width, height, depth, flat_dimensions, element)
 
         x_analysis = self.analyze_dimension(width)
         y_analysis = self.analyze_dimension(height)
         z_analysis = self.analyze_dimension(depth)
         
-        print(f"Analyse X ({width}): {x_analysis}")
-        print(f"Analyse Y ({height}): {y_analysis}")
-        print(f"Analyse Z ({depth}): {z_analysis}")
+        print(f"Analysis X ({width}): {x_analysis}")
+        print(f"Analysis Y ({height}): {y_analysis}")
+        print(f"Analysis Z ({depth}): {z_analysis}")
 
         cubes = self._generate_cubes_from_analysis(x_analysis, y_analysis, z_analysis, element)
         
-        print(f"Génération de {len(cubes)} cubes")
+        print(f"Generating {len(cubes)} cubes")
         
         return cubes
     
     def _handle_flat_surface(self, width: float, height: float, depth: float, 
                            flat_dimensions: List[str], element: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Gère les surfaces plates en convertissant les dimensions 0 en 0.011"""
+        """Handle flat surfaces by converting 0 dimensions to 0.011"""
 
         converted_width = self.flat_thickness if width == 0 else width
         converted_height = self.flat_thickness if height == 0 else height  
         converted_depth = self.flat_thickness if depth == 0 else depth
         
-        print(f"🔷 Conversion surface plate: {width}x{height}x{depth} → {converted_width}x{converted_height}x{converted_depth}")
+        print(f"🔷 Converting flat surface: {width}x{height}x{depth} → {converted_width}x{converted_height}x{converted_depth}")
 
         non_flat_dimensions = []
         if width > 0:
@@ -91,7 +91,7 @@ class SmartCubeOptimizer:
             non_flat_dimensions.append(('depth', depth))
         
         if len(non_flat_dimensions) == 0:
-            print("🔷 Point dégénéré - création d'un cube minimal")
+            print("🔷 Degenerate point - creating minimal cube")
             return [{
                 "position": (0, 0, 0),
                 "size": (self.flat_thickness, self.flat_thickness, self.flat_thickness),
@@ -104,7 +104,7 @@ class SmartCubeOptimizer:
         
         elif len(non_flat_dimensions) == 1:
             dim_name, dim_value = non_flat_dimensions[0]
-            print(f"🔷 Ligne détectée - subdivision selon {dim_name} ({dim_value})")
+            print(f"🔷 Line detected - subdividing along {dim_name} ({dim_value})")
 
             dim_analysis = self.analyze_dimension(dim_value)
             divisions = self._get_divisions_from_analysis(dim_analysis, dim_value)
@@ -137,7 +137,7 @@ class SmartCubeOptimizer:
             return cubes
         
         else:
-            print(f"🔷 Surface 2D détectée - subdivision 2D")
+            print(f"🔷 2D Surface detected - 2D subdivision")
 
             dim1_name, dim1_value = non_flat_dimensions[0]
             dim2_name, dim2_value = non_flat_dimensions[1]

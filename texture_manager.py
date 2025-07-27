@@ -1,4 +1,4 @@
-"""Gestionnaire de textures multiples pour les modèles Blockbench"""
+"""MultiTextureManager: A class to handle multiple textures in Blockbench models."""
 
 import base64
 import io
@@ -18,8 +18,7 @@ class MultiTextureManager:
         extracted_textures = {}
         
         print(f"### Extraction of {len(textures)} textures ###")
-        
-        # Find the first texture to use as default (ID 0)
+
         default_texture = None
         
         for texture_data in textures:
@@ -37,7 +36,6 @@ class MultiTextureManager:
                     extracted_textures[texture_id] = texture_image
                     print(f"  Texture {texture_id} ({texture_name}): {texture_image.size}")
                     
-                    # Store first texture as default
                     if default_texture is None:
                         default_texture = texture_image
                 else:
@@ -47,7 +45,6 @@ class MultiTextureManager:
                 print(f"ID of invalid texture: {texture_id}")
                 continue
         
-        # Add the default texture as ID 0 if needed
         if default_texture and 0 not in extracted_textures:
             extracted_textures[0] = default_texture
             print("  Added first texture as default (ID 0)")
@@ -86,10 +83,8 @@ class MultiTextureManager:
             texture_id = face_data.get("texture")
             if texture_id is not None:
                 try:
-                    # Add this check for ID 0
                     texture_id = int(texture_id) 
                     if texture_id == 0 and 1 in self.textures_cache:
-                        # Map texture 0 to first texture if present
                         texture_id = 1
                     texture_ids.add(texture_id)
                 except (ValueError, TypeError):
@@ -134,7 +129,7 @@ class MultiTextureManager:
             
             try:
                 texture_id = int(texture_id)
-                # Map texture ID 0 to first available texture if needed
+ 
                 if texture_id == 0 and 0 not in all_textures and len(all_textures) > 0:
                     texture_id = min(all_textures.keys())
             except (ValueError, TypeError):
@@ -296,13 +291,11 @@ class MultiTextureManager:
 
     def validate_texture(self, texture: Image.Image) -> bool:
         """Validate texture dimensions and format"""
-        # Check power of 2 dimensions
         if not (texture.width & (texture.width - 1) == 0) or \
            not (texture.height & (texture.height - 1) == 0):
             print(f"Warning: Texture dimensions ({texture.width}x{texture.height}) are not power of 2")
             return False
-            
-        # Check maximum size
+
         if texture.width > 1024 or texture.height > 1024:
             print("Warning: Texture exceeds maximum size of 1024x1024")
             return False
