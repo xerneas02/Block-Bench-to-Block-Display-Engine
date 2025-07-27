@@ -17,7 +17,7 @@ This project provides a toolset to convert [Blockbench](https://blockbench.net/)
 
 ## 🚀 How to Use
 
-### � Installation
+### ⚙️ Installation
 
 Clone the repository:
 
@@ -26,7 +26,7 @@ git clone https://github.com/xerneas02/Block-Bench-to-Block-Display-Engine
 cd Block-Bench-to-Block-Display-Engine
 ```
 
-### �🔧 Requirements
+### 🔧 Requirements
 
 Install dependencies:
 
