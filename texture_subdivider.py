@@ -719,10 +719,8 @@ class TextureSubdivider:
     def create_black_texture(self) -> str:
         """Create an entirely black texture for hidden faces"""
         
-        # Create a black head texture
         black_texture = Image.new('RGBA', (self.head_texture_size, self.head_texture_size), (0, 0, 0, 255))
         
-        # Convert to base64
         buffered = io.BytesIO()
         black_texture.save(buffered, format="PNG")
         img_str = base64.b64encode(buffered.getvalue()).decode()
