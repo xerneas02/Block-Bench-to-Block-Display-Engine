@@ -88,8 +88,10 @@ Converted to BDEngine
 
 ## ⚠️ Limitations & Known Issues
 
-* 🔄 Rotation handling is sometimes off when stacking multiple transformed cubes
+* 🔄 Rotation translation doesn't work correctly all the time - some rotations may not be accurate
 * 🖼️ Texture atlas construction for mixed-texture elements can fail in edge cases
+* 🚫 Transparent textures are not handled currently
+* 📐 High resolution textures are not supported - only works with 16x textures from Blockbench for now
 * 🐞 This project is still under development please report issues or contribute fixes
 
 ---
