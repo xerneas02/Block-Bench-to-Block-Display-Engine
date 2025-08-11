@@ -1,603 +1,317 @@
 """Subdivide Minecraft head textures for multiple cubes with correct face mapping and orientation."""
 
 import base64
-import json
 import io
-from PIL import Image
 from typing import Dict, Any, List, Tuple, Optional
-import math
+from PIL import Image
+
 
 class TextureSubdivider:
     """Divide textures for multiple heads with correct face mapping and orientation"""
-    
+
+    # ---- Debug ----
+    debug = True
+
+    def _dbg(self, msg: str):
+        if getattr(self, "debug", False):
+            print(msg)
+
+    # ---- Init / layout ----
     def __init__(self):
         self.head_texture_size = 64
         self.head_active_area = 32
-        
+        # Java head layout
         self.head_face_mapping = {
-            "up": {"region": (8, 0, 16, 8)},       # Top face (8x8)
-            "down": {"region": (16, 0, 24, 8)},    # Bottom face (8x8)
-            "north": {"region": (8, 8, 16, 16)},   # Front face (8x8)
-            "south": {"region": (24, 8, 32, 16)},  # Back face (8x8)
-            "east": {"region": (0, 8, 8, 16)},     # Right face (8x8)
-            "west": {"region": (16, 8, 24, 16)}    # Left face (8x8)
+            "up": {"region": (8, 0, 16, 8)},       # Top
+            "down": {"region": (16, 0, 24, 8)},    # Bottom
+            "north": {"region": (8, 8, 16, 16)},   # Front
+            "south": {"region": (24, 8, 32, 16)},  # Back
+            "east": {"region": (0, 8, 8, 16)},     # Right
+            "west": {"region": (16, 8, 24, 16)},   # Left
         }
-    
-    def subdivide_texture_for_cubes(self, source_texture: Image.Image, source_element: Dict[str, Any], 
-                                   cube_divisions: List[Dict[str, Any]]) -> List[Optional[str]]:
-        """Subdivide texture for multiple cubes with correct face mapping and orientation"""
-        
+
+    # ---- Public APIs ----
+    def subdivide_texture_for_cubes(
+        self,
+        source_texture: Image.Image,
+        source_element: Dict[str, Any],
+        cube_divisions: List[Dict[str, Any]],
+    ) -> List[Optional[str]]:
+        """Single texture for the element; split among cubes."""
         print(f"\n### Subdivision for texture {len(cube_divisions)} cubes ###")
-        
+
         source_faces = source_element.get("faces", {})
-        
         from_pos = source_element.get("from", [0, 0, 0])
         to_pos = source_element.get("to", [16, 16, 16])
-        
-        total_width = to_pos[0] - from_pos[0]
-        total_height = to_pos[1] - from_pos[1]
-        total_depth = to_pos[2] - from_pos[2]
-        
-        print(f"Original element: {total_width}x{total_height}x{total_depth}")
-        
-        textures = []
-        for i, cube_division in enumerate(cube_divisions):
+
+        total_w = to_pos[0] - from_pos[0]
+        total_h = to_pos[1] - from_pos[1]
+        total_d = to_pos[2] - from_pos[2]
+        total_element_size = (total_w, total_h, total_d)
+
+        print(f"Original element: {total_w}x{total_h}x{total_d}")
+
+        out: List[Optional[str]] = []
+        for i, cube_div in enumerate(cube_divisions):
             print(f"\nComputing cube {i+1}:")
-            
-            cube_texture = self._create_texture_for_cube(
-                source_texture, source_faces, cube_division, i, 
-                (total_width, total_height, total_depth), cube_divisions
+            tex = self._create_texture_for_cube(
+                source_texture,
+                source_faces,
+                cube_div,
+                i,
+                total_element_size,
+                cube_divisions,
             )
-            
-            if cube_texture:
-                buffered = io.BytesIO()
-                cube_texture.save(buffered, format="PNG")
-                img_str = base64.b64encode(buffered.getvalue()).decode()
-                texture_data = f"data:image/png;base64,{img_str}"
-                
-                debug_filename = f"debug_cube_{i+1}_texture.png"
-                cube_texture.save(debug_filename)
-                print(f"Texture saved: {debug_filename}")
-                
-                textures.append(texture_data)
+            if tex:
+                buf = io.BytesIO()
+                tex.save(buf, format="PNG")
+                out.append(f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}")
             else:
-                textures.append(None)
-        
-        return textures
-    
-    def _create_texture_for_cube(self, source_texture: Image.Image, source_faces: Dict[str, Any], 
-                                cube_division: Dict[str, Any], cube_index: int, 
-                                total_element_size: Tuple[float, float, float], 
-                                all_cube_divisions: List[Dict[str, Any]]) -> Optional[Image.Image]:
-        """Create texture for a single cube with correct face mapping and orientation"""
-        
-        cube_pos = cube_division["position"]
-        cube_size = cube_division["size"]
-        
-        print(f"Position: {cube_pos}, Size: {cube_size}")
-        
-        head_texture = Image.new('RGBA', (self.head_texture_size, self.head_texture_size), (0, 0, 0, 0))
-        
-        for face_name, face_info in self.head_face_mapping.items():
-            if face_name in source_faces:
-                is_visible = self._is_face_visible_for_cube(face_name, cube_pos, cube_size, all_cube_divisions)
-                
-                if is_visible:
-                    face_texture = self._extract_face_texture_for_cube(
-                        source_texture, source_faces[face_name], cube_pos, cube_size, face_name, total_element_size
-                    )
-                    
-                    if face_texture:
-                        face_texture = face_texture.resize((8, 8), Image.NEAREST)
-                        
-                        target_region = face_info["region"]
-                        head_texture.paste(face_texture, target_region)
-                        
-                        print(f"Face {face_name}: ✅ visible")
-                    else:
-                        black_face = Image.new('RGBA', (8, 8), (0, 0, 0, 255))
-                        target_region = face_info["region"]
-                        head_texture.paste(black_face, target_region)
-                        print(f"Face {face_name}: ⬛ (extraction error)")
-                else:
-                    black_face = Image.new('RGBA', (8, 8), (0, 0, 0, 255))
-                    target_region = face_info["region"]
-                    head_texture.paste(black_face, target_region)
-                    print(f"Face {face_name}: ⬛ (hidden)")
-            else:
-                black_face = Image.new('RGBA', (8, 8), (0, 0, 0, 255))
-                target_region = face_info["region"]
-                head_texture.paste(black_face, target_region)
-                print(f"Face {face_name}: ⬛ (undefined)")
-        
-        return head_texture
-    
-    def _extract_face_texture_for_cube(self, source_texture: Image.Image, face_data: Dict[str, Any], 
-                                      cube_pos: Tuple[float, float, float], cube_size: Tuple[float, float, float], 
-                                      face_name: str, total_element_size: Tuple[float, float, float]) -> Optional[Image.Image]:
-        """Extract the texture for a specific face of a cube with correct UV mapping"""
-        
-        try:
-            original_uv = face_data.get("uv", [0, 0, 0, 0])
-            
-            u1, v1, u2, v2 = original_uv
-            left = min(u1, u2)
-            right = max(u1, u2)
-            top = min(v1, v2)
-            bottom = max(v1, v2)
-            
-            print(f"Original UV {face_name}: ({left}, {top}, {right}, {bottom})")
-            
-            face_region = self._calculate_face_region_for_cube_exact(
-                (left, top, right, bottom), cube_pos, cube_size, face_name, total_element_size, source_texture
-            )
-            
-            if face_region is None:
-                return None
-            
-            print(f"Region computed: {face_region}")
-            
-            face_texture = source_texture.crop(face_region)
-            
-            return face_texture
-            
-        except Exception as e:
-            print(f"Error extracting face {face_name}: {e}")
-            return None
-    
-    def _calculate_face_region_for_cube_exact(self, original_face_uv: Tuple[float, float, float, float], 
-                                             cube_pos: Tuple[float, float, float], cube_size: Tuple[float, float, float], 
-                                             face_name: str, total_element_size: Tuple[float, float, float],
-                                             source_texture: Image.Image) -> Optional[Tuple[int, int, int, int]]:
-        """Calculate which region of the original face corresponds to this cube with EXACT mapping and correct orientation"""
-        
-        cube_x, cube_y, cube_z = cube_pos
-        cube_w, cube_h, cube_d = cube_size
-        total_w, total_h, total_d = total_element_size
-        
-        orig_left, orig_top, orig_right, orig_bottom = original_face_uv
-        
-        uv_width = orig_right - orig_left
-        uv_height = orig_bottom - orig_top
-        
-        print(f"      Cube pos: {cube_pos}, size: {cube_size}")
-        print(f"      Total size: {total_element_size}")
-        print(f"      UV original: {uv_width}x{uv_height}")
-        
-        if face_name == "north":
-            x_ratio_start = (total_w - cube_x - cube_w) / total_w
-            x_ratio_end = (total_w - cube_x) / total_w
-            
-            y_ratio_start = (total_h - cube_y - cube_h) / total_h
-            y_ratio_end = (total_h - cube_y) / total_h
-            
-            new_left = orig_left + (x_ratio_start * uv_width)
-            new_right = orig_left + (x_ratio_end * uv_width)
-            new_top = orig_top + (y_ratio_start * uv_height)
-            new_bottom = orig_top + (y_ratio_end * uv_height)
-            
-        elif face_name == "south":
-            x_ratio_start = cube_x / total_w
-            x_ratio_end = (cube_x + cube_w) / total_w
-            
-            y_ratio_start = (total_h - cube_y - cube_h) / total_h
-            y_ratio_end = (total_h - cube_y) / total_h
-            
-            new_left = orig_left + (x_ratio_start * uv_width)
-            new_right = orig_left + (x_ratio_end * uv_width)
-            new_top = orig_top + (y_ratio_start * uv_height)
-            new_bottom = orig_top + (y_ratio_end * uv_height)
-            
-        elif face_name == "east":
-            z_ratio_start = (total_d - cube_z - cube_d) / total_d
-            z_ratio_end = (total_d - cube_z) / total_d
-            
-            y_ratio_start = (total_h - cube_y - cube_h) / total_h
-            y_ratio_end = (total_h - cube_y) / total_h
-            
-            new_left = orig_left + (z_ratio_start * uv_width)
-            new_right = orig_left + (z_ratio_end * uv_width)
-            new_top = orig_top + (y_ratio_start * uv_height)
-            new_bottom = orig_top + (y_ratio_end * uv_height)
-            
-        elif face_name == "west":
-            z_ratio_start = cube_z / total_d
-            z_ratio_end = (cube_z + cube_d) / total_d
-            
-            y_ratio_start = (total_h - cube_y - cube_h) / total_h
-            y_ratio_end = (total_h - cube_y) / total_h
-            
-            new_left = orig_left + (z_ratio_start * uv_width)
-            new_right = orig_left + (z_ratio_end * uv_width)
-            new_top = orig_top + (y_ratio_start * uv_height)
-            new_bottom = orig_top + (y_ratio_end * uv_height)
-            
-        elif face_name == "up":
-            x_ratio_start = (total_w - cube_x - cube_w) / total_w
-            x_ratio_end = (total_w - cube_x) / total_w
-            
-            z_ratio_start = (total_d - cube_z - cube_d) / total_d
-            z_ratio_end = (total_d - cube_z) / total_d
-            
-            new_left = orig_left + (x_ratio_start * uv_width)
-            new_right = orig_left + (x_ratio_end * uv_width)
-            new_top = orig_top + (z_ratio_start * uv_height)
-            new_bottom = orig_top + (z_ratio_end * uv_height)
-            
-        elif face_name == "down":
-            x_ratio_start = (total_w - cube_x - cube_w) / total_w
-            x_ratio_end = (total_w - cube_x) / total_w
-            
-            z_ratio_start = (total_d - cube_z - cube_d) / total_d
-            z_ratio_end = (total_d - cube_z) / total_d
-            
-            new_left = orig_left + (x_ratio_start * uv_width)
-            new_right = orig_left + (x_ratio_end * uv_width)
-            new_top = orig_top + (z_ratio_start * uv_height)
-            new_bottom = orig_top + (z_ratio_end * uv_height)
-            
-        else:
-            return None
+                out.append(None)
+        return out
 
-        final_left = max(0, int(new_left))
-        final_top = max(0, int(new_top))
-        final_right = min(source_texture.width, max(final_left + 1, int(round(new_right))))
-        final_bottom = min(source_texture.height, max(final_top + 1, int(round(new_bottom))))
-
-        if final_right <= final_left or final_bottom <= final_top:
-            print(f"      Invalid region: ({final_left}, {final_top}, {final_right}, {final_bottom})")
-            return None
-        
-        print(f"      Final mapping (corrected {face_name}): ({final_left}, {final_top}, {final_right}, {final_bottom})")
-        
-        return (final_left, final_top, final_right, final_bottom)
-    
-    def _is_face_visible_for_cube(self, face_name: str, cube_pos: Tuple[float, float, float], 
-                                 cube_size: Tuple[float, float, float], all_cubes: List[Dict[str, Any]]) -> bool:
-        """Determine if a face is visible for a cube (not hidden by another cube)"""
-        
-        cube_x, cube_y, cube_z = cube_pos
-        cube_w, cube_h, cube_d = cube_size
-
-        if face_name == "north":
-            face_center = (cube_x + cube_w/2, cube_y + cube_h/2, cube_z)
-            face_normal = (0, 0, -1)
-            
-        elif face_name == "south":
-            face_center = (cube_x + cube_w/2, cube_y + cube_h/2, cube_z + cube_d)
-            face_normal = (0, 0, 1)
-            
-        elif face_name == "west":
-            face_center = (cube_x, cube_y + cube_h/2, cube_z + cube_d/2)
-            face_normal = (-1, 0, 0)
-            
-        elif face_name == "east":
-            face_center = (cube_x + cube_w, cube_y + cube_h/2, cube_z + cube_d/2)
-            face_normal = (1, 0, 0)
-            
-        elif face_name == "down":
-            face_center = (cube_x + cube_w/2, cube_y, cube_z + cube_d/2)
-            face_normal = (0, -1, 0)
-            
-        elif face_name == "up":
-            face_center = (cube_x + cube_w/2, cube_y + cube_h, cube_z + cube_d/2)
-            face_normal = (0, 1, 0)
-            
-        else:
-            return True
-        
-        for other_cube in all_cubes:
-            other_pos = other_cube["position"]
-            other_size = other_cube["size"]
-            
-            if other_pos == cube_pos and other_size == cube_size:
-                continue
-            
-            if self._cube_blocks_face(face_center, face_normal, other_pos, other_size):
-                print(f"      Face {face_name} blocked by cube at {other_pos}")
-                return False
-        
-        return True
-    
-    def _cube_blocks_face(self, face_center: Tuple[float, float, float], face_normal: Tuple[float, float, float],
-                         blocking_cube_pos: Tuple[float, float, float], blocking_cube_size: Tuple[float, float, float]) -> bool:
-        """Check if a cube blocks a face"""
-        
-        block_x, block_y, block_z = blocking_cube_pos
-        block_w, block_h, block_d = blocking_cube_size
-        
-        face_x, face_y, face_z = face_center
-        normal_x, normal_y, normal_z = face_normal
-
-        block_min_x = block_x
-        block_max_x = block_x + block_w
-        block_min_y = block_y
-        block_max_y = block_y + block_h
-        block_min_z = block_z
-        block_max_z = block_z + block_d
-
-        tolerance = 0.1
-        
-        if normal_x > 0:
-            if (block_min_x <= face_x + tolerance and block_max_x > face_x and
-                block_min_y <= face_y + tolerance and block_max_y >= face_y - tolerance and
-                block_min_z <= face_z + tolerance and block_max_z >= face_z - tolerance):
-                return True
-                
-        elif normal_x < 0:
-            if (block_max_x >= face_x - tolerance and block_min_x < face_x and
-                block_min_y <= face_y + tolerance and block_max_y >= face_y - tolerance and
-                block_min_z <= face_z + tolerance and block_max_z >= face_z - tolerance):
-                return True
-                
-        elif normal_y > 0:
-            if (block_min_y <= face_y + tolerance and block_max_y > face_y and
-                block_min_x <= face_x + tolerance and block_max_x >= face_x - tolerance and
-                block_min_z <= face_z + tolerance and block_max_z >= face_z - tolerance):
-                return True
-                
-        elif normal_y < 0:
-            if (block_max_y >= face_y - tolerance and block_min_y < face_y and
-                block_min_x <= face_x + tolerance and block_max_x >= face_x - tolerance and
-                block_min_z <= face_z + tolerance and block_max_z >= face_z - tolerance):
-                return True
-                
-        elif normal_z > 0:
-            if (block_min_z <= face_z + tolerance and block_max_z > face_z and
-                block_min_x <= face_x + tolerance and block_max_x >= face_x - tolerance and
-                block_min_y <= face_y + tolerance and block_max_y >= face_y - tolerance):
-                return True
-                
-        elif normal_z < 0:
-            if (block_max_z >= face_z - tolerance and block_min_z < face_z and
-                block_min_x <= face_x + tolerance and block_max_x >= face_x - tolerance and
-                block_min_y <= face_y + tolerance and block_max_y >= face_y - tolerance):
-                return True
-        
-        return False
-    
-    def create_black_texture(self) -> str:
-        """Create an entirely black texture for hidden faces"""
-
-        black_texture = Image.new('RGBA', (self.head_texture_size, self.head_texture_size), (0, 0, 0, 255))
-
-        buffered = io.BytesIO()
-        black_texture.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-        
-        return f"data:image/png;base64,{img_str}"
-    
-    def subdivide_texture_for_cubes_with_individual_textures(self, source_element: Dict[str, Any], 
-                                                          cube_divisions: List[Dict[str, Any]], 
-                                                          all_textures: Dict[int, Image.Image]) -> List[Optional[str]]:
-        """Subdivide textures with individual face textures handling"""
-        
+    def subdivide_texture_for_cubes_with_individual_textures(
+        self,
+        source_element: Dict[str, Any],
+        cube_divisions: List[Dict[str, Any]],
+        all_textures: Dict[int, Image.Image],
+    ) -> List[Optional[str]]:
+        """Each face may reference its own texture; split among cubes."""
         print(f"\n### Subdivision texture for {len(cube_divisions)} cubes with individual textures ###")
 
         source_faces = source_element.get("faces", {})
-
         from_pos = source_element.get("from", [0, 0, 0])
         to_pos = source_element.get("to", [16, 16, 16])
-        
-        total_width = to_pos[0] - from_pos[0]
-        total_height = to_pos[1] - from_pos[1]
-        total_depth = to_pos[2] - from_pos[2]
-        
-        print(f"Original element: {total_width}x{total_height}x{total_depth}")
-        print(f"Available textures: {list(all_textures.keys())}")
 
+        total_w = to_pos[0] - from_pos[0]
+        total_h = to_pos[1] - from_pos[1]
+        total_d = to_pos[2] - from_pos[2]
+        total_element_size = (total_w, total_h, total_d)
+
+        print(f"Original element: {total_w}x{total_h}x{total_d}")
+        print(f"Available textures: {list(all_textures.keys())}")
         for face_name, face_data in source_faces.items():
-            texture_id = face_data.get("texture")
-            uv = face_data.get("uv", [0, 0, 16, 16])
-            print(f"Face {face_name}: texture {texture_id}, UV {uv}")
-        
-        textures = []
-        for i, cube_division in enumerate(cube_divisions):
+            print(f"Face {face_name}: texture {face_data.get('texture')}, UV {face_data.get('uv', [0,0,16,16])}")
+
+        out: List[Optional[str]] = []
+        for i, cube_div in enumerate(cube_divisions):
             print(f"\nProcessing cube {i+1}:")
-            
-            cube_texture = self._create_texture_for_cube_with_individual_textures(
-                source_faces, cube_division, i, 
-                (total_width, total_height, total_depth), cube_divisions, all_textures
+            tex = self._create_texture_for_cube_with_individual_textures(
+                source_faces,
+                cube_div,
+                i,
+                total_element_size,
+                cube_divisions,
+                all_textures,
             )
-            
-            if cube_texture:
-                buffered = io.BytesIO()
-                cube_texture.save(buffered, format="PNG")
-                img_str = base64.b64encode(buffered.getvalue()).decode()
-                texture_data = f"data:image/png;base64,{img_str}"
-                
+            if tex:
+                buf = io.BytesIO()
+                tex.save(buf, format="PNG")
+                out.append(f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}")
                 print(f"Texture generated for cube {i+1}")
-                textures.append(texture_data)
             else:
-                textures.append(None)
-        
-        return textures
-    
-    def _create_texture_for_cube_with_individual_textures(self, source_faces: Dict[str, Any], 
-                                                        cube_division: Dict[str, Any], cube_index: int, 
-                                                        total_element_size: Tuple[float, float, float], 
-                                                        all_cube_divisions: List[Dict[str, Any]],
-                                                        all_textures: Dict[int, Image.Image]) -> Optional[Image.Image]:
-        """Create a head texture for a specific cube with individual face textures"""
-        
+                out.append(None)
+        return out
+
+    # ---- Core creators ----
+    def _create_texture_for_cube(
+        self,
+        source_texture: Image.Image,
+        source_faces: Dict[str, Any],
+        cube_division: Dict[str, Any],
+        cube_index: int,
+        total_element_size: Tuple[float, float, float],
+        all_cube_divisions: List[Dict[str, Any]],
+    ) -> Optional[Image.Image]:
+        """Single source texture path."""
         cube_pos = cube_division["position"]
         cube_size = cube_division["size"]
-        
-        print(f"Position: {cube_pos}, Size: {cube_size}")
-        
-        head_texture = Image.new('RGBA', (self.head_texture_size, self.head_texture_size), (0, 0, 0, 0))
-        
+        print(f"Position: {cube_pos}, Size: {cube_size} Cube")
+
+        head = Image.new("RGBA", (self.head_texture_size, self.head_texture_size), (0, 0, 0, 0))
+
         for face_name, face_info in self.head_face_mapping.items():
-            if face_name in source_faces:
-                is_visible = self._is_face_visible_for_cube(face_name, cube_pos, cube_size, all_cube_divisions)
-                
-                if is_visible:
-                    face_data = source_faces[face_name]
-                    texture_id = face_data.get("texture")
-                    
-                    if texture_id is not None and int(texture_id) in all_textures:
-                        face_source_texture = all_textures[int(texture_id)]
-                        
-                        face_texture = self._extract_face_texture_for_cube_individual(
-                            face_source_texture, face_data, cube_pos, cube_size, face_name, total_element_size
-                        )
-                        
-                        if face_texture:
-                            face_texture = face_texture.resize((8, 8), Image.NEAREST)
-                            
-                            target_region = face_info["region"]
-                            head_texture.paste(face_texture, target_region)
-                            
-                            print(f"Face {face_name}: ✅ texture {texture_id}")
-                        else:
-                            black_face = Image.new('RGBA', (8, 8), (0, 0, 0, 255))
-                            target_region = face_info["region"]
-                            head_texture.paste(black_face, target_region)
-                            print(f"Face {face_name}: ⬛ (extraction error texture {texture_id})")
-                    else:
-                        black_face = Image.new('RGBA', (8, 8), (0, 0, 0, 255))
-                        target_region = face_info["region"]
-                        head_texture.paste(black_face, target_region)
-                        print(f"Face {face_name}: ⬛ (texture {texture_id} not found)")
-                else:
-                    black_face = Image.new('RGBA', (8, 8), (0, 0, 0, 255))
-                    target_region = face_info["region"]
-                    head_texture.paste(black_face, target_region)
-                    print(f"Face {face_name}: ⬛ (hidden)")
+            if face_name not in source_faces:
+                self._paste_black(head, face_info["region"], f"Face {face_name}: ⬛ (undefined)")
+                continue
+
+            if not self._is_face_visible_for_cube(face_name, cube_pos, cube_size, all_cube_divisions):
+                self._paste_black(head, face_info["region"], f"Face {face_name}: ⬛ (hidden)")
+                continue
+
+            # Extract and paste
+            tex = self._extract_face_texture(
+                source_texture, source_faces[face_name], cube_pos, cube_size, face_name, total_element_size
+            )
+            if tex:
+                head.paste(tex.resize((8, 8), Image.NEAREST), face_info["region"])
+                print(f"Face {face_name}: ✅ visible")
             else:
-                black_face = Image.new('RGBA', (8, 8), (0, 0, 0, 255))
-                target_region = face_info["region"]
-                head_texture.paste(black_face, target_region)
-                print(f"Face {face_name}: ⬛ (not defined)")
-        
-        return head_texture
-    
-    def _extract_face_texture_for_cube_individual(self, face_source_texture: Image.Image, face_data: Dict[str, Any], 
-                                                cube_pos: Tuple[float, float, float], cube_size: Tuple[float, float, float], 
-                                                face_name: str, total_element_size: Tuple[float, float, float]) -> Optional[Image.Image]:
-        """Extract the texture of a face for a specific cube with individual texture"""
-        
+                self._paste_black(head, face_info["region"], f"Face {face_name}: ⬛ (extraction error)")
+        return head
+
+    def _create_texture_for_cube_with_individual_textures(
+        self,
+        source_faces: Dict[str, Any],
+        cube_division: Dict[str, Any],
+        cube_index: int,
+        total_element_size: Tuple[float, float, float],
+        all_cube_divisions: List[Dict[str, Any]],
+        all_textures: Dict[int, Image.Image],
+    ) -> Optional[Image.Image]:
+        """Per-face texture path with flat-side blending."""
+        cube_pos = cube_division["position"]
+        cube_size = cube_division["size"]
+        print(f"Position: {cube_pos}, Size: {cube_size} Individual")
+
+        head = Image.new("RGBA", (self.head_texture_size, self.head_texture_size), (0, 0, 0, 0))
+
+        flat_flags = self.get_flat_faces(total_element_size)  # [N,E,S,W,U,D]
+        face_order = ["north", "east", "south", "west", "up", "down"]
+        print(f"Flat flags: {flat_flags} (is_flat={any(flat_flags)})")
+
+        for face_name, face_info in self.head_face_mapping.items():
+            if face_name not in source_faces:
+                self._paste_black(head, face_info["region"], f"Face {face_name}: ⬛ (not defined)")
+                continue
+
+            if not self._is_face_visible_for_cube(face_name, cube_pos, cube_size, all_cube_divisions):
+                self._paste_black(head, face_info["region"], f"Face {face_name}: ⬛ (hidden)")
+                continue
+
+            face_data = source_faces[face_name]
+            texture_id = face_data.get("texture")
+
+            # First: if flat element and this face is a thin side → blended paint
+            try:
+                idx = face_order.index(face_name)
+            except ValueError:
+                idx = -1
+            if idx >= 0 and any(flat_flags) and not flat_flags[idx]:
+                blended = self._make_blended_side_face(face_name, source_faces, all_textures, total_element_size)
+                if blended is not None:
+                    head.paste(blended.resize((8, 8), Image.NEAREST), face_info["region"])
+                    print(f"Face {face_name}: 🎨 blended from adjacent edges (flat element)")
+                    continue  # skip normal extraction
+
+            # Fallback: normal extraction
+            if texture_id is None or int(texture_id) not in all_textures:
+                self._paste_black(head, face_info["region"], f"Face {face_name}: ⬛ (texture {texture_id} not found)")
+                continue
+
+            face_source_texture = all_textures[int(texture_id)]
+            tex = self._extract_face_texture(
+                face_source_texture, face_data, cube_pos, cube_size, face_name, total_element_size
+            )
+            if tex:
+                head.paste(tex.resize((8, 8), Image.NEAREST), face_info["region"])
+                print(f"Face {face_name}: ✅ texture {texture_id}")
+            else:
+                self._paste_black(head, face_info["region"], f"Face {face_name}: ⬛ (extraction error texture {texture_id})")
+        return head
+
+    # ---- Extraction helpers ----
+    def _extract_face_texture(
+        self,
+        face_source_texture: Image.Image,
+        face_data: Dict[str, Any],
+        cube_pos: Tuple[float, float, float],
+        cube_size: Tuple[float, float, float],
+        face_name: str,
+        total_element_size: Tuple[float, float, float],
+    ) -> Optional[Image.Image]:
+        """Shared extraction that crops from face_source_texture."""
         try:
             original_uv = face_data.get("uv", [0, 0, face_source_texture.width, face_source_texture.height])
-
             u1, v1, u2, v2 = original_uv
-            left = min(u1, u2)
-            right = max(u1, u2)
-            top = min(v1, v2)
-            bottom = max(v1, v2)
-            
-            print(f"Original UVs {face_name}: ({left}, {top}, {right}, {bottom}) on texture {face_source_texture.size}")
+            left, right = min(u1, u2), max(u1, u2)
+            top, bottom = min(v1, v2), max(v1, v2)
 
-            face_region = self._calculate_face_region_for_cube_exact(
+            self._dbg(f"Original UVs {face_name}: ({left}, {top}, {right}, {bottom}) on texture {face_source_texture.size}")
+
+            region = self._calculate_face_region_for_cube_exact(
                 (left, top, right, bottom), cube_pos, cube_size, face_name, total_element_size, face_source_texture
             )
-            
-            if face_region is None:
+            if region is None:
                 return None
-            
-            print(f"Region calculated: {face_region}")
 
-            face_texture = face_source_texture.crop(face_region)
-            
-            return face_texture
-            
+            self._dbg(f"Region calculated: {region}")
+            return face_source_texture.crop(region)
         except Exception as e:
             print(f"Error extracting face {face_name}: {e}")
             return None
-    
-    def _calculate_face_region_for_cube_exact(self, original_face_uv: Tuple[float, float, float, float], 
-                                             cube_pos: Tuple[float, float, float], cube_size: Tuple[float, float, float], 
-                                             face_name: str, total_element_size: Tuple[float, float, float],
-                                             source_texture: Image.Image) -> Optional[Tuple[int, int, int, int]]:
-        """Calculate which region of the original face corresponds to this cube with EXACT mapping and correct orientation"""
-        
+
+    def _safe_div(self, n: float, d: float, label: str) -> float:
+        if d == 0:
+            raise ZeroDivisionError(f"denominator 0 for {label}")
+        return n / d
+
+    def _calculate_face_region_for_cube_exact(
+        self,
+        original_face_uv: Tuple[float, float, float, float],
+        cube_pos: Tuple[float, float, float],
+        cube_size: Tuple[float, float, float],
+        face_name: str,
+        total_element_size: Tuple[float, float, float],
+        source_texture: Image.Image,
+    ) -> Optional[Tuple[int, int, int, int]]:
+        """Map sub-cube to sub-UV with explicit orientation and guarded divisions."""
         cube_x, cube_y, cube_z = cube_pos
         cube_w, cube_h, cube_d = cube_size
         total_w, total_h, total_d = total_element_size
-        
-        orig_left, orig_top, orig_right, orig_bottom = original_face_uv
 
+        orig_left, orig_top, orig_right, orig_bottom = original_face_uv
         uv_width = orig_right - orig_left
         uv_height = orig_bottom - orig_top
-        
-        print(f"      Cube pos: {cube_pos}, size: {cube_size}")
-        print(f"      Total size: {total_element_size}")
-        print(f"      UV original: {uv_width}x{uv_height}")
-        
+
+        self._dbg(f"      Cube pos: {cube_pos}, size: {cube_size}")
+        self._dbg(f"      Total size: {total_element_size}")
+        self._dbg(f"      UV original: {uv_width}x{uv_height}")
+
+        # Compute ratios safely
         if face_name == "north":
-            x_ratio_start = (total_w - cube_x - cube_w) / total_w
-            x_ratio_end = (total_w - cube_x) / total_w
-            
-            y_ratio_start = (total_h - cube_y - cube_h) / total_h
-            y_ratio_end = (total_h - cube_y) / total_h
-            
-            new_left = orig_left + (x_ratio_start * uv_width)
-            new_right = orig_left + (x_ratio_end * uv_width)
-            new_top = orig_top + (y_ratio_start * uv_height)
-            new_bottom = orig_top + (y_ratio_end * uv_height)
-            
+            x0 = self._safe_div((total_w - cube_x - cube_w), total_w, "total_w")
+            x1 = self._safe_div((total_w - cube_x), total_w, "total_w")
+            y0 = self._safe_div((total_h - cube_y - cube_h), total_h, "total_h")
+            y1 = self._safe_div((total_h - cube_y), total_h, "total_h")
+
         elif face_name == "south":
-            x_ratio_start = cube_x / total_w
-            x_ratio_end = (cube_x + cube_w) / total_w
-            
-            y_ratio_start = (total_h - cube_y - cube_h) / total_h
-            y_ratio_end = (total_h - cube_y) / total_h
-            
-            new_left = orig_left + (x_ratio_start * uv_width)
-            new_right = orig_left + (x_ratio_end * uv_width)
-            new_top = orig_top + (y_ratio_start * uv_height)
-            new_bottom = orig_top + (y_ratio_end * uv_height)
-            
+            x0 = self._safe_div(cube_x, total_w, "total_w")
+            x1 = self._safe_div((cube_x + cube_w), total_w, "total_w")
+            y0 = self._safe_div((total_h - cube_y - cube_h), total_h, "total_h")
+            y1 = self._safe_div((total_h - cube_y), total_h, "total_h")
+
         elif face_name == "east":
-            z_ratio_start = (total_d - cube_z - cube_d) / total_d
-            z_ratio_end = (total_d - cube_z) / total_d
-            
-            y_ratio_start = (total_h - cube_y - cube_h) / total_h
-            y_ratio_end = (total_h - cube_y) / total_h
-            
-            new_left = orig_left + (z_ratio_start * uv_width)
-            new_right = orig_left + (z_ratio_end * uv_width)
-            new_top = orig_top + (y_ratio_start * uv_height)
-            new_bottom = orig_top + (y_ratio_end * uv_height)
-            
+            x0 = self._safe_div((total_d - cube_z - cube_d), total_d, "total_d")
+            x1 = self._safe_div((total_d - cube_z), total_d, "total_d")
+            y0 = self._safe_div((total_h - cube_y - cube_h), total_h, "total_h")
+            y1 = self._safe_div((total_h - cube_y), total_h, "total_h")
+
         elif face_name == "west":
-            z_ratio_start = cube_z / total_d
-            z_ratio_end = (cube_z + cube_d) / total_d
-            
-            y_ratio_start = (total_h - cube_y - cube_h) / total_h
-            y_ratio_end = (total_h - cube_y) / total_h
-            
-            new_left = orig_left + (z_ratio_start * uv_width)
-            new_right = orig_left + (z_ratio_end * uv_width)
-            new_top = orig_top + (y_ratio_start * uv_height)
-            new_bottom = orig_top + (y_ratio_end * uv_height)
-            
+            x0 = self._safe_div(cube_z, total_d, "total_d")
+            x1 = self._safe_div((cube_z + cube_d), total_d, "total_d")
+            y0 = self._safe_div((total_h - cube_y - cube_h), total_h, "total_h")
+            y1 = self._safe_div((total_h - cube_y), total_h, "total_h")
+
         elif face_name == "up":
-            x_ratio_start = (total_w - cube_x - cube_w) / total_w
-            x_ratio_end = (total_w - cube_x) / total_w
-            
-            z_ratio_start = (total_d - cube_z - cube_d) / total_d
-            z_ratio_end = (total_d - cube_z) / total_d
-            
-            new_left = orig_left + (x_ratio_start * uv_width)
-            new_right = orig_left + (x_ratio_end * uv_width)
-            new_top = orig_top + (z_ratio_start * uv_height)
-            new_bottom = orig_top + (z_ratio_end * uv_height)
-            
+            x0 = self._safe_div((total_w - cube_x - cube_w), total_w, "total_w")
+            x1 = self._safe_div((total_w - cube_x), total_w, "total_w")
+            y0 = self._safe_div((total_d - cube_z - cube_d), total_d, "total_d")
+            y1 = self._safe_div((total_d - cube_z), total_d, "total_d")
+
         elif face_name == "down":
-            x_ratio_start = (total_w - cube_x - cube_w) / total_w
-            x_ratio_end = (total_w - cube_x) / total_w
-            
-            z_ratio_start = (total_d - cube_z - cube_d) / total_d
-            z_ratio_end = (total_d - cube_z) / total_d
-            
-            new_left = orig_left + (x_ratio_start * uv_width)
-            new_right = orig_left + (x_ratio_end * uv_width)
-            new_top = orig_top + (z_ratio_start * uv_height)
-            new_bottom = orig_top + (z_ratio_end * uv_height)
-            
+            x0 = self._safe_div((total_w - cube_x - cube_w), total_w, "total_w")
+            x1 = self._safe_div((total_w - cube_x), total_w, "total_w")
+            y0 = self._safe_div((total_d - cube_z - cube_d), total_d, "total_d")
+            y1 = self._safe_div((total_d - cube_z), total_d, "total_d")
+
         else:
             return None
+
+        new_left = orig_left + (x0 * uv_width)
+        new_right = orig_left + (x1 * uv_width)
+        new_top = orig_top + (y0 * uv_height)
+        new_bottom = orig_top + (y1 * uv_height)
 
         final_left = max(0, int(new_left))
         final_top = max(0, int(new_top))
@@ -607,882 +321,217 @@ class TextureSubdivider:
         if final_right <= final_left or final_bottom <= final_top:
             print(f"      Invalid region: ({final_left}, {final_top}, {final_right}, {final_bottom})")
             return None
-        
-        print(f"      Final mapping (corrected {face_name}): ({final_left}, {final_top}, {final_right}, {final_bottom})")
-        
-        return (final_left, final_top, final_right, final_bottom)
-    
-    def _is_face_visible_for_cube(self, face_name: str, cube_pos: Tuple[float, float, float], 
-                                 cube_size: Tuple[float, float, float], all_cubes: List[Dict[str, Any]]) -> bool:
-        """Determine if a face is visible for a cube (not hidden by another cube)"""
-        
-        cube_x, cube_y, cube_z = cube_pos
-        cube_w, cube_h, cube_d = cube_size
 
-        if face_name == "north":
-            face_center = (cube_x + cube_w/2, cube_y + cube_h/2, cube_z)
-            face_normal = (0, 0, -1)
-            
-        elif face_name == "south":
-            face_center = (cube_x + cube_w/2, cube_y + cube_h/2, cube_z + cube_d)
-            face_normal = (0, 0, 1)
-            
-        elif face_name == "west":
-            face_center = (cube_x, cube_y + cube_h/2, cube_z + cube_d/2)
-            face_normal = (-1, 0, 0)
-            
-        elif face_name == "east":
-            face_center = (cube_x + cube_w, cube_y + cube_h/2, cube_z + cube_d/2)
-            face_normal = (1, 0, 0)
-            
-        elif face_name == "down":
-            face_center = (cube_x + cube_w/2, cube_y, cube_z + cube_d/2)
-            face_normal = (0, -1, 0)
-            
-        elif face_name == "up":
-            face_center = (cube_x + cube_w/2, cube_y + cube_h, cube_z + cube_d/2)
-            face_normal = (0, 1, 0)
-            
-        else:
-            return True
-        
-        for other_cube in all_cubes:
-            other_pos = other_cube["position"]
-            other_size = other_cube["size"]
-            
-            if other_pos == cube_pos and other_size == cube_size:
-                continue
-            
-            if self._cube_blocks_face(face_center, face_normal, other_pos, other_size):
-                print(f"      Face {face_name} blocked by cube at {other_pos}")
-                return False
-        
-        return True
-    
-    def _cube_blocks_face(self, face_center: Tuple[float, float, float], face_normal: Tuple[float, float, float],
-                         blocking_cube_pos: Tuple[float, float, float], blocking_cube_size: Tuple[float, float, float]) -> bool:
-        """Check if a cube blocks a face"""
-        
-        block_x, block_y, block_z = blocking_cube_pos
-        block_w, block_h, block_d = blocking_cube_size
-        
-        face_x, face_y, face_z = face_center
-        normal_x, normal_y, normal_z = face_normal
-        
-        block_min_x = block_x
-        block_max_x = block_x + block_w
-        block_min_y = block_y
-        block_max_y = block_y + block_h
-        block_min_z = block_z
-        block_max_z = block_z + block_d
-        
-        tolerance = 0.1
-        
-        if normal_x > 0:
-            if (block_min_x <= face_x + tolerance and block_max_x > face_x and
-                block_min_y <= face_y + tolerance and block_max_y >= face_y - tolerance and
-                block_min_z <= face_z + tolerance and block_max_z >= face_z - tolerance):
-                return True
-                
-        elif normal_x < 0:
-            if (block_max_x >= face_x - tolerance and block_min_x < face_x and
-                block_min_y <= face_y + tolerance and block_max_y >= face_y - tolerance and
-                block_min_z <= face_z + tolerance and block_max_z >= face_z - tolerance):
-                return True
-                
-        elif normal_y > 0:
-            if (block_min_y <= face_y + tolerance and block_max_y > face_y and
-                block_min_x <= face_x + tolerance and block_max_x >= face_x - tolerance and
-                block_min_z <= face_z + tolerance and block_max_z >= face_z - tolerance):
-                return True
-                
-        elif normal_y < 0:
-            if (block_max_y >= face_y - tolerance and block_min_y < face_y and
-                block_min_x <= face_x + tolerance and block_max_x >= face_x - tolerance and
-                block_min_z <= face_z + tolerance and block_max_z >= face_z - tolerance):
-                return True
-                
-        elif normal_z > 0:
-            if (block_min_z <= face_z + tolerance and block_max_z > face_z and
-                block_min_x <= face_x + tolerance and block_max_x >= face_x - tolerance and
-                block_min_y <= face_y + tolerance and block_max_y >= face_y - tolerance):
-                return True
-                
-        elif normal_z < 0:
-            if (block_max_z >= face_z - tolerance and block_min_z < face_z and
-                block_min_x <= face_x + tolerance and block_max_x >= face_x - tolerance and
-                block_min_y <= face_y + tolerance and block_max_y >= face_y - tolerance):
-                return True
-        
-        return False
-    
-    def create_black_texture(self) -> str:
-        """Create an entirely black texture for hidden faces"""
-        
-        black_texture = Image.new('RGBA', (self.head_texture_size, self.head_texture_size), (0, 0, 0, 255))
-        
-        buffered = io.BytesIO()
-        black_texture.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-        
-        return f"data:image/png;base64,{img_str}"
-    
-    def subdivide_texture_for_cubes_with_individual_textures(self, source_element: Dict[str, Any], 
-                                                          cube_divisions: List[Dict[str, Any]], 
-                                                          all_textures: Dict[int, Image.Image]) -> List[Optional[str]]:
-        """Subdivide textures with individual face textures handling"""
-        
-        print(f"\n### Subdivision texture for {len(cube_divisions)} cubes with individual textures ###")
-        
-        source_faces = source_element.get("faces", {})
+        self._dbg(f"      Final mapping ({face_name}): ({final_left}, {final_top}, {final_right}, {final_bottom})")
+        return final_left, final_top, final_right, final_bottom
 
-        from_pos = source_element.get("from", [0, 0, 0])
-        to_pos = source_element.get("to", [16, 16, 16])
-        
-        total_width = to_pos[0] - from_pos[0]
-        total_height = to_pos[1] - from_pos[1]
-        total_depth = to_pos[2] - from_pos[2]
-        
-        print(f"Original element: {total_width}x{total_height}x{total_depth}")
-        print(f"Available textures: {list(all_textures.keys())}")
-
-        for face_name, face_data in source_faces.items():
-            texture_id = face_data.get("texture")
-            uv = face_data.get("uv", [0, 0, 16, 16])
-            print(f"Face {face_name}: texture {texture_id}, UV {uv}")
-        
-        textures = []
-        for i, cube_division in enumerate(cube_divisions):
-            print(f"\nProcessing cube {i+1}:")
-            
-            cube_texture = self._create_texture_for_cube_with_individual_textures(
-                source_faces, cube_division, i, 
-                (total_width, total_height, total_depth), cube_divisions, all_textures
-            )
-            
-            if cube_texture:
-                buffered = io.BytesIO()
-                cube_texture.save(buffered, format="PNG")
-                img_str = base64.b64encode(buffered.getvalue()).decode()
-                texture_data = f"data:image/png;base64,{img_str}"
-                
-                print(f"Texture generated for cube {i+1}")
-                textures.append(texture_data)
-            else:
-                textures.append(None)
-        
-        return textures
-    
-    def _create_texture_for_cube_with_individual_textures(self, source_faces: Dict[str, Any], 
-                                                        cube_division: Dict[str, Any], cube_index: int, 
-                                                        total_element_size: Tuple[float, float, float], 
-                                                        all_cube_divisions: List[Dict[str, Any]],
-                                                        all_textures: Dict[int, Image.Image]) -> Optional[Image.Image]:
-        """Create a head texture for a specific cube with individual face textures"""
-        
-        print(f"\nProcessing cube {cube_index + 1}:")
-        cube_pos = cube_division["position"]
-        cube_size = cube_division["size"]
-        
-        print(f"Position: {cube_pos}, Size: {cube_size}")
-        
-        head_texture = Image.new('RGBA', (self.head_texture_size, self.head_texture_size), (0, 0, 0, 0))
-        
-        for face_name, face_info in self.head_face_mapping.items():
-            if face_name in source_faces:
-                is_visible = self._is_face_visible_for_cube(face_name, cube_pos, cube_size, all_cube_divisions)
-                
-                if is_visible:
-                    face_data = source_faces[face_name]
-                    texture_id = face_data.get("texture")
-                    
-                    if texture_id is not None and int(texture_id) in all_textures:
-                        face_source_texture = all_textures[int(texture_id)]
-                        
-                        face_texture = self._extract_face_texture_for_cube_individual(
-                            face_source_texture, face_data, cube_pos, cube_size, face_name, total_element_size
-                        )
-                        
-                        if face_texture:
-                            face_texture = face_texture.resize((8, 8), Image.NEAREST)
-
-                            target_region = face_info["region"]
-                            head_texture.paste(face_texture, target_region)
-                            
-                            print(f"Face {face_name}: ✅ texture {texture_id}")
-                        else:
-                            black_face = Image.new('RGBA', (8, 8), (0, 0, 0, 255))
-                            target_region = face_info["region"]
-                            head_texture.paste(black_face, target_region)
-                            print(f"Face {face_name}: ⬛ (extraction error texture {texture_id})")
-                    else:
-                        black_face = Image.new('RGBA', (8, 8), (0, 0, 0, 255))
-                        target_region = face_info["region"]
-                        head_texture.paste(black_face, target_region)
-                        print(f"Face {face_name}: ⬛ (texture {texture_id} not found)")
-                else:
-                    black_face = Image.new('RGBA', (8, 8), (0, 0, 0, 255))
-                    target_region = face_info["region"]
-                    head_texture.paste(black_face, target_region)
-                    print(f"Face {face_name}: ⬛ (hidden)")
-            else:
-                black_face = Image.new('RGBA', (8, 8), (0, 0, 0, 255))
-                target_region = face_info["region"]
-                head_texture.paste(black_face, target_region)
-                print(f"Face {face_name}: ⬛ (not defined)")
-        
-        return head_texture
-    
-    def _extract_face_texture_for_cube_individual(self, face_source_texture: Image.Image, face_data: Dict[str, Any], 
-                                                cube_pos: Tuple[float, float, float], cube_size: Tuple[float, float, float], 
-                                                face_name: str, total_element_size: Tuple[float, float, float]) -> Optional[Image.Image]:
-        """Extract the texture of a face for a specific cube with individual texture"""
-        
-        try:
-            original_uv = face_data.get("uv", [0, 0, face_source_texture.width, face_source_texture.height])
-
-            u1, v1, u2, v2 = original_uv
-            left = min(u1, u2)
-            right = max(u1, u2)
-            top = min(v1, v2)
-            bottom = max(v1, v2)
-            
-            print(f"Original UVs {face_name}: ({left}, {top}, {right}, {bottom}) on texture {face_source_texture.size}")
-
-            face_region = self._calculate_face_region_for_cube_exact(
-                (left, top, right, bottom), cube_pos, cube_size, face_name, total_element_size, face_source_texture
-            )
-            
-            if face_region is None:
-                return None
-            
-            print(f"Region calculated: {face_region}")
-
-            face_texture = face_source_texture.crop(face_region)
-            
-            return face_texture
-            
-        except Exception as e:
-            print(f"Error extracting face {face_name}: {e}")
-            return None
-    
-    def _calculate_face_region_for_cube_exact(self, original_face_uv: Tuple[float, float, float, float], 
-                                             cube_pos: Tuple[float, float, float], cube_size: Tuple[float, float, float], 
-                                             face_name: str, total_element_size: Tuple[float, float, float],
-                                             source_texture: Image.Image) -> Optional[Tuple[int, int, int, int]]:
-        """Calculate which region of the original face corresponds to this cube with EXACT mapping and correct orientation"""
-        
-        cube_x, cube_y, cube_z = cube_pos
-        cube_w, cube_h, cube_d = cube_size
-        total_w, total_h, total_d = total_element_size
-        
-        orig_left, orig_top, orig_right, orig_bottom = original_face_uv
-
-        uv_width = orig_right - orig_left
-        uv_height = orig_bottom - orig_top
-        
-        print(f"      Cube pos: {cube_pos}, size: {cube_size}")
-        print(f"      Total size: {total_element_size}")
-        print(f"      UV original: {uv_width}x{uv_height}")
-        
-        if face_name == "north":
-            x_ratio_start = (total_w - cube_x - cube_w) / total_w
-            x_ratio_end = (total_w - cube_x) / total_w
-            
-            y_ratio_start = (total_h - cube_y - cube_h) / total_h
-            y_ratio_end = (total_h - cube_y) / total_h
-            
-            new_left = orig_left + (x_ratio_start * uv_width)
-            new_right = orig_left + (x_ratio_end * uv_width)
-            new_top = orig_top + (y_ratio_start * uv_height)
-            new_bottom = orig_top + (y_ratio_end * uv_height)
-            
-        elif face_name == "south":
-            x_ratio_start = cube_x / total_w
-            x_ratio_end = (cube_x + cube_w) / total_w
-            
-            y_ratio_start = (total_h - cube_y - cube_h) / total_h
-            y_ratio_end = (total_h - cube_y) / total_h
-            
-            new_left = orig_left + (x_ratio_start * uv_width)
-            new_right = orig_left + (x_ratio_end * uv_width)
-            new_top = orig_top + (y_ratio_start * uv_height)
-            new_bottom = orig_top + (y_ratio_end * uv_height)
-            
-        elif face_name == "east":
-            z_ratio_start = (total_d - cube_z - cube_d) / total_d
-            z_ratio_end = (total_d - cube_z) / total_d
-            
-            y_ratio_start = (total_h - cube_y - cube_h) / total_h
-            y_ratio_end = (total_h - cube_y) / total_h
-            
-            new_left = orig_left + (z_ratio_start * uv_width)
-            new_right = orig_left + (z_ratio_end * uv_width)
-            new_top = orig_top + (y_ratio_start * uv_height)
-            new_bottom = orig_top + (y_ratio_end * uv_height)
-            
-        elif face_name == "west":
-            z_ratio_start = cube_z / total_d
-            z_ratio_end = (cube_z + cube_d) / total_d
-            
-            y_ratio_start = (total_h - cube_y - cube_h) / total_h
-            y_ratio_end = (total_h - cube_y) / total_h
-            
-            new_left = orig_left + (z_ratio_start * uv_width)
-            new_right = orig_left + (z_ratio_end * uv_width)
-            new_top = orig_top + (y_ratio_start * uv_height)
-            new_bottom = orig_top + (y_ratio_end * uv_height)
-            
-        elif face_name == "up":
-            x_ratio_start = (total_w - cube_x - cube_w) / total_w
-            x_ratio_end = (total_w - cube_x) / total_w
-            
-            z_ratio_start = (total_d - cube_z - cube_d) / total_d
-            z_ratio_end = (total_d - cube_z) / total_d
-            
-            new_left = orig_left + (x_ratio_start * uv_width)
-            new_right = orig_left + (x_ratio_end * uv_width)
-            new_top = orig_top + (z_ratio_start * uv_height)
-            new_bottom = orig_top + (z_ratio_end * uv_height)
-            
-        elif face_name == "down":
-            x_ratio_start = (total_w - cube_x - cube_w) / total_w
-            x_ratio_end = (total_w - cube_x) / total_w
-            
-            z_ratio_start = (total_d - cube_z - cube_d) / total_d
-            z_ratio_end = (total_d - cube_z) / total_d
-            
-            new_left = orig_left + (x_ratio_start * uv_width)
-            new_right = orig_left + (x_ratio_end * uv_width)
-            new_top = orig_top + (z_ratio_start * uv_height)
-            new_bottom = orig_top + (z_ratio_end * uv_height)
-            
-        else:
-            return None
-
-        final_left = max(0, int(new_left))
-        final_top = max(0, int(new_top))
-        final_right = min(source_texture.width, max(final_left + 1, int(round(new_right))))
-        final_bottom = min(source_texture.height, max(final_top + 1, int(round(new_bottom))))
-
-        if final_right <= final_left or final_bottom <= final_top:
-            print(f"      Invalid region: ({final_left}, {final_top}, {final_right}, {final_bottom})")
-            return None
-        
-        print(f"      Final mapping (corrected {face_name}): ({final_left}, {final_top}, {final_right}, {final_bottom})")
-        
-        return (final_left, final_top, final_right, final_bottom)
-    
-    def _is_face_visible_for_cube(self, face_name: str, cube_pos: Tuple[float, float, float], 
-                                 cube_size: Tuple[float, float, float], all_cubes: List[Dict[str, Any]]) -> bool:
-        """Determine if a face is visible for a cube (not hidden by another cube)"""
-        
-        cube_x, cube_y, cube_z = cube_pos
-        cube_w, cube_h, cube_d = cube_size
-
-        if face_name == "north":
-            face_center = (cube_x + cube_w/2, cube_y + cube_h/2, cube_z)
-            face_normal = (0, 0, -1)
-            
-        elif face_name == "south":
-            face_center = (cube_x + cube_w/2, cube_y + cube_h/2, cube_z + cube_d)
-            face_normal = (0, 0, 1)
-            
-        elif face_name == "west":
-            face_center = (cube_x, cube_y + cube_h/2, cube_z + cube_d/2)
-            face_normal = (-1, 0, 0)
-            
-        elif face_name == "east":
-            face_center = (cube_x + cube_w, cube_y + cube_h/2, cube_z + cube_d/2)
-            face_normal = (1, 0, 0)
-            
-        elif face_name == "down":
-            face_center = (cube_x + cube_w/2, cube_y, cube_z + cube_d/2)
-            face_normal = (0, -1, 0)
-            
-        elif face_name == "up":
-            face_center = (cube_x + cube_w/2, cube_y + cube_h, cube_z + cube_d/2)
-            face_normal = (0, 1, 0) 
-            
-        else:
-            return True
-        
-        for other_cube in all_cubes:
-            other_pos = other_cube["position"]
-            other_size = other_cube["size"]
-            
-            if other_pos == cube_pos and other_size == cube_size:
-                continue
-            
-            if self._cube_blocks_face(face_center, face_normal, other_pos, other_size):
-                print(f"      Face {face_name} blocked by cube at {other_pos}")
-                return False
-        
-        return True
-    
-    def _cube_blocks_face(self, face_center: Tuple[float, float, float], face_normal: Tuple[float, float, float],
-                         blocking_cube_pos: Tuple[float, float, float], blocking_cube_size: Tuple[float, float, float]) -> bool:
-        """Check if a cube blocks a face"""
-        
-        block_x, block_y, block_z = blocking_cube_pos
-        block_w, block_h, block_d = blocking_cube_size
-        
-        face_x, face_y, face_z = face_center
-        normal_x, normal_y, normal_z = face_normal
-        
-        block_min_x = block_x
-        block_max_x = block_x + block_w
-        block_min_y = block_y
-        block_max_y = block_y + block_h
-        block_min_z = block_z
-        block_max_z = block_z + block_d
-        
-        tolerance = 0.1
-        
-        if normal_x > 0:
-            if (block_min_x <= face_x + tolerance and block_max_x > face_x and
-                block_min_y <= face_y + tolerance and block_max_y >= face_y - tolerance and
-                block_min_z <= face_z + tolerance and block_max_z >= face_z - tolerance):
-                return True
-                
-        elif normal_x < 0:
-            if (block_max_x >= face_x - tolerance and block_min_x < face_x and
-                block_min_y <= face_y + tolerance and block_max_y >= face_y - tolerance and
-                block_min_z <= face_z + tolerance and block_max_z >= face_z - tolerance):
-                return True
-                
-        elif normal_y > 0:
-            if (block_min_y <= face_y + tolerance and block_max_y > face_y and
-                block_min_x <= face_x + tolerance and block_max_x >= face_x - tolerance and
-                block_min_z <= face_z + tolerance and block_max_z >= face_z - tolerance):
-                return True
-                
-        elif normal_y < 0:
-            if (block_max_y >= face_y - tolerance and block_min_y < face_y and
-                block_min_x <= face_x + tolerance and block_max_x >= face_x - tolerance and
-                block_min_z <= face_z + tolerance and block_max_z >= face_z - tolerance):
-                return True
-                
-        elif normal_z > 0:
-            if (block_min_z <= face_z + tolerance and block_max_z > face_z and
-                block_min_x <= face_x + tolerance and block_max_x >= face_x - tolerance and
-                block_min_y <= face_y + tolerance and block_max_y >= face_y - tolerance):
-                return True
-                
-        elif normal_z < 0:
-            if (block_max_z >= face_z - tolerance and block_min_z < face_z and
-                block_min_x <= face_x + tolerance and block_max_x >= face_x - tolerance and
-                block_min_y <= face_y + tolerance and block_max_y >= face_y - tolerance):
-                return True
-        
-        return False
-    
-    def create_black_texture(self) -> str:
-        """Create an entirely black texture for hidden faces"""
-
-        black_texture = Image.new('RGBA', (self.head_texture_size, self.head_texture_size), (0, 0, 0, 255))
-
-        buffered = io.BytesIO()
-        black_texture.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-        
-        return f"data:image/png;base64,{img_str}"
-    
-    def subdivide_texture_for_cubes_with_individual_textures(self, source_element: Dict[str, Any], 
-                                                          cube_divisions: List[Dict[str, Any]], 
-                                                          all_textures: Dict[int, Image.Image]) -> List[Optional[str]]:
-        """Subdivide textures with individual face textures handling"""
-        
-        print(f"\n### Subdivision texture for {len(cube_divisions)} cubes with individual textures ###")
-
-        source_faces = source_element.get("faces", {})
-
-        from_pos = source_element.get("from", [0, 0, 0])
-        to_pos = source_element.get("to", [16, 16, 16])
-        
-        total_width = to_pos[0] - from_pos[0]
-        total_height = to_pos[1] - from_pos[1]
-        total_depth = to_pos[2] - from_pos[2]
-        
-        print(f"Original element: {total_width}x{total_height}x{total_depth}")
-        print(f"Available textures: {list(all_textures.keys())}")
-
-        for face_name, face_data in source_faces.items():
-            texture_id = face_data.get("texture")
-            uv = face_data.get("uv", [0, 0, 16, 16])
-            print(f"Face {face_name}: texture {texture_id}, UV {uv}")
-        
-        textures = []
-        for i, cube_division in enumerate(cube_divisions):
-            print(f"\nProcessing cube {i+1}:")
-            
-            cube_texture = self._create_texture_for_cube_with_individual_textures(
-                source_faces, cube_division, i, 
-                (total_width, total_height, total_depth), cube_divisions, all_textures
-            )
-            
-            if cube_texture:
-                buffered = io.BytesIO()
-                cube_texture.save(buffered, format="PNG")
-                img_str = base64.b64encode(buffered.getvalue()).decode()
-                texture_data = f"data:image/png;base64,{img_str}"
-                
-                print(f"Texture generated for cube {i+1}")
-                textures.append(texture_data)
-            else:
-                textures.append(None)
-        
-        return textures
-    
-    def _create_texture_for_cube_with_individual_textures(self, source_faces: Dict[str, Any], 
-                                                        cube_division: Dict[str, Any], cube_index: int, 
-                                                        total_element_size: Tuple[float, float, float], 
-                                                        all_cube_divisions: List[Dict[str, Any]],
-                                                        all_textures: Dict[int, Image.Image]) -> Optional[Image.Image]:
-        """Create a head texture for a specific cube with individual face textures"""
-        
-        cube_pos = cube_division["position"]
-        cube_size = cube_division["size"]
-        
-        print(f"Position: {cube_pos}, Size: {cube_size}")
-        
-        head_texture = Image.new('RGBA', (self.head_texture_size, self.head_texture_size), (0, 0, 0, 0))
-        
-        for face_name, face_info in self.head_face_mapping.items():
-            if face_name in source_faces:
-                is_visible = self._is_face_visible_for_cube(face_name, cube_pos, cube_size, all_cube_divisions)
-                
-                if is_visible:
-                    face_data = source_faces[face_name]
-                    texture_id = face_data.get("texture")
-                    
-                    if texture_id is not None and int(texture_id) in all_textures:
-                        face_source_texture = all_textures[int(texture_id)]
-                        
-                        face_texture = self._extract_face_texture_for_cube_individual(
-                            face_source_texture, face_data, cube_pos, cube_size, face_name, total_element_size
-                        )
-                        
-                        if face_texture:
-                            face_texture = face_texture.resize((8, 8), Image.NEAREST)
-
-                            target_region = face_info["region"]
-                            head_texture.paste(face_texture, target_region)
-                            
-                            print(f"Face {face_name}: ✅ texture {texture_id}")
-                        else:
-                            black_face = Image.new('RGBA', (8, 8), (0, 0, 0, 255))
-                            target_region = face_info["region"]
-                            head_texture.paste(black_face, target_region)
-                            print(f"Face {face_name}: ⬛ (extraction error texture {texture_id})")
-                    else:
-                        black_face = Image.new('RGBA', (8, 8), (0, 0, 0, 255))
-                        target_region = face_info["region"]
-                        head_texture.paste(black_face, target_region)
-                        print(f"Face {face_name}: ⬛ (texture {texture_id} not found)")
-                else:
-                    black_face = Image.new('RGBA', (8, 8), (0, 0, 0, 255))
-                    target_region = face_info["region"]
-                    head_texture.paste(black_face, target_region)
-                    print(f"Face {face_name}: ⬛ (hidden)")
-            else:
-                black_face = Image.new('RGBA', (8, 8), (0, 0, 0, 255))
-                target_region = face_info["region"]
-                head_texture.paste(black_face, target_region)
-                print(f"Face {face_name}: ⬛ (not defined)")
-        
-        return head_texture
-    
-    def _extract_face_texture_for_cube_individual(self, face_source_texture: Image.Image, face_data: Dict[str, Any], 
-                                                cube_pos: Tuple[float, float, float], cube_size: Tuple[float, float, float], 
-                                                face_name: str, total_element_size: Tuple[float, float, float]) -> Optional[Image.Image]:
-        """Extract the texture of a face for a specific cube with individual texture"""
-        
-        try:
-            original_uv = face_data.get("uv", [0, 0, face_source_texture.width, face_source_texture.height])
-
-            u1, v1, u2, v2 = original_uv
-            left = min(u1, u2)
-            right = max(u1, u2)
-            top = min(v1, v2)
-            bottom = max(v1, v2)
-            
-            print(f"Original UVs {face_name}: ({left}, {top}, {right}, {bottom}) on texture {face_source_texture.size}")
-
-            face_region = self._calculate_face_region_for_cube_exact(
-                (left, top, right, bottom), cube_pos, cube_size, face_name, total_element_size, face_source_texture
-            )
-            
-            if face_region is None:
-                return None
-            
-            print(f"Region calculated: {face_region}")
-
-            face_texture = face_source_texture.crop(face_region)
-            
-            return face_texture
-            
-        except Exception as e:
-            print(f"Error extracting face {face_name}: {e}")
-            return None
-    
-    def _calculate_face_region_for_cube_exact(self, original_face_uv: Tuple[float, float, float, float], 
-                                             cube_pos: Tuple[float, float, float], cube_size: Tuple[float, float, float], 
-                                             face_name: str, total_element_size: Tuple[float, float, float],
-                                             source_texture: Image.Image) -> Optional[Tuple[int, int, int, int]]:
-        """Calculate which region of the original face corresponds to this cube with EXACT mapping and correct orientation"""
-        
-        cube_x, cube_y, cube_z = cube_pos
-        cube_w, cube_h, cube_d = cube_size
-        total_w, total_h, total_d = total_element_size
-        
-        orig_left, orig_top, orig_right, orig_bottom = original_face_uv
-
-        uv_width = orig_right - orig_left
-        uv_height = orig_bottom - orig_top
-        
-        print(f"      Cube pos: {cube_pos}, size: {cube_size}")
-        print(f"      Total size: {total_element_size}")
-        print(f"      UV original: {uv_width}x{uv_height}")
-        
-        if face_name == "north":
-            x_ratio_start = (total_w - cube_x - cube_w) / total_w
-            x_ratio_end = (total_w - cube_x) / total_w
-            
-            y_ratio_start = (total_h - cube_y - cube_h) / total_h
-            y_ratio_end = (total_h - cube_y) / total_h
-            
-            new_left = orig_left + (x_ratio_start * uv_width)
-            new_right = orig_left + (x_ratio_end * uv_width)
-            new_top = orig_top + (y_ratio_start * uv_height)
-            new_bottom = orig_top + (y_ratio_end * uv_height)
-            
-        elif face_name == "south":
-            x_ratio_start = cube_x / total_w
-            x_ratio_end = (cube_x + cube_w) / total_w
-            
-            y_ratio_start = (total_h - cube_y - cube_h) / total_h
-            y_ratio_end = (total_h - cube_y) / total_h
-            
-            new_left = orig_left + (x_ratio_start * uv_width)
-            new_right = orig_left + (x_ratio_end * uv_width)
-            new_top = orig_top + (y_ratio_start * uv_height)
-            new_bottom = orig_top + (y_ratio_end * uv_height)
-            
-        elif face_name == "east":
-            z_ratio_start = (total_d - cube_z - cube_d) / total_d
-            z_ratio_end = (total_d - cube_z) / total_d
-            
-            y_ratio_start = (total_h - cube_y - cube_h) / total_h
-            y_ratio_end = (total_h - cube_y) / total_h
-            
-            new_left = orig_left + (z_ratio_start * uv_width)
-            new_right = orig_left + (z_ratio_end * uv_width)
-            new_top = orig_top + (y_ratio_start * uv_height)
-            new_bottom = orig_top + (y_ratio_end * uv_height)
-            
-        elif face_name == "west":
-            z_ratio_start = cube_z / total_d
-            z_ratio_end = (cube_z + cube_d) / total_d
-            
-            y_ratio_start = (total_h - cube_y - cube_h) / total_h
-            y_ratio_end = (total_h - cube_y) / total_h
-            
-            new_left = orig_left + (z_ratio_start * uv_width)
-            new_right = orig_left + (z_ratio_end * uv_width)
-            new_top = orig_top + (y_ratio_start * uv_height)
-            new_bottom = orig_top + (y_ratio_end * uv_height)
-            
-        elif face_name == "up":
-            x_ratio_start = (total_w - cube_x - cube_w) / total_w
-            x_ratio_end = (total_w - cube_x) / total_w
-            
-            z_ratio_start = (total_d - cube_z - cube_d) / total_d
-            z_ratio_end = (total_d - cube_z) / total_d
-            
-            new_left = orig_left + (x_ratio_start * uv_width)
-            new_right = orig_left + (x_ratio_end * uv_width)
-            new_top = orig_top + (z_ratio_start * uv_height)
-            new_bottom = orig_top + (z_ratio_end * uv_height)
-            
-        elif face_name == "down":
-            x_ratio_start = (total_w - cube_x - cube_w) / total_w
-            x_ratio_end = (total_w - cube_x) / total_w
-            
-            z_ratio_start = (total_d - cube_z - cube_d) / total_d
-            z_ratio_end = (total_d - cube_z) / total_d
-            
-            new_left = orig_left + (x_ratio_start * uv_width)
-            new_right = orig_left + (x_ratio_end * uv_width)
-            new_top = orig_top + (z_ratio_start * uv_height)
-            new_bottom = orig_top + (z_ratio_end * uv_height)
-            
-        else:
-            return None
-
-        final_left = max(0, int(new_left))
-        final_top = max(0, int(new_top))
-        final_right = min(source_texture.width, max(final_left + 1, int(round(new_right))))
-        final_bottom = min(source_texture.height, max(final_top + 1, int(round(new_bottom))))
-
-        if final_right <= final_left or final_bottom <= final_top:
-            print(f"      Invalid region: ({final_left}, {final_top}, {final_right}, {final_bottom})")
-            return None
-        
-        print(f"      Final mapping (corrected {face_name}): ({final_left}, {final_top}, {final_right}, {final_bottom})")
-        
-        return (final_left, final_top, final_right, final_bottom)
-    
-    def _is_face_visible_for_cube(self, face_name: str, cube_pos: Tuple[float, float, float], 
-                                 cube_size: Tuple[float, float, float], all_cubes: List[Dict[str, Any]]) -> bool:
-        """Determine if a face is visible for a cube (not hidden by another cube)"""
-        
-        cube_x, cube_y, cube_z = cube_pos
-        cube_w, cube_h, cube_d = cube_size
-
-        if face_name == "north":
-            face_center = (cube_x + cube_w/2, cube_y + cube_h/2, cube_z)
-            face_normal = (0, 0, -1)
-            
-        elif face_name == "south":
-            face_center = (cube_x + cube_w/2, cube_y + cube_h/2, cube_z + cube_d)
-            face_normal = (0, 0, 1)
-            
-        elif face_name == "west":
-            face_center = (cube_x, cube_y + cube_h/2, cube_z + cube_d/2)
-            face_normal = (-1, 0, 0)
-            
-        elif face_name == "east":
-            face_center = (cube_x + cube_w, cube_y + cube_h/2, cube_z + cube_d/2)
-            face_normal = (1, 0, 0)
-            
-        elif face_name == "down":
-            face_center = (cube_x + cube_w/2, cube_y, cube_z + cube_d/2)
-            face_normal = (0, -1, 0)
-            
-        elif face_name == "up":
-            face_center = (cube_x + cube_w/2, cube_y + cube_h, cube_z + cube_d/2)
-            face_normal = (0, 1, 0)
-            
-        else:
-            return True
-
-        for other_cube in all_cubes:
-            other_pos = other_cube["position"]
-            other_size = other_cube["size"]
-            
-            if other_pos == cube_pos and other_size == cube_size:
-                continue
-            
-            if self._cube_blocks_face(face_center, face_normal, other_pos, other_size):
-                print(f"      Face {face_name} blocked by cube at {other_pos}")
-                return False
-        
-        return True
-    
-    def _cube_blocks_face(self, face_center: Tuple[float, float, float], face_normal: Tuple[float, float, float],
-                         blocking_cube_pos: Tuple[float, float, float], blocking_cube_size: Tuple[float, float, float]) -> bool:
-        """Check if a cube blocks a face"""
-        
-        block_x, block_y, block_z = blocking_cube_pos
-        block_w, block_h, block_d = blocking_cube_size
-        
-        face_x, face_y, face_z = face_center
-        normal_x, normal_y, normal_z = face_normal
-
-        block_min_x = block_x
-        block_max_x = block_x + block_w
-        block_min_y = block_y
-        block_max_y = block_y + block_h
-        block_min_z = block_z
-        block_max_z = block_z + block_d
-
-        tolerance = 0.1
-        
-        if normal_x > 0:
-            if (block_min_x <= face_x + tolerance and block_max_x > face_x and
-                block_min_y <= face_y + tolerance and block_max_y >= face_y - tolerance and
-                block_min_z <= face_z + tolerance and block_max_z >= face_z - tolerance):
-                return True
-                
-        elif normal_x < 0:
-            if (block_max_x >= face_x - tolerance and block_min_x < face_x and
-                block_min_y <= face_y + tolerance and block_max_y >= face_y - tolerance and
-                block_min_z <= face_z + tolerance and block_max_z >= face_z - tolerance):
-                return True
-                
-        elif normal_y > 0:
-            if (block_min_y <= face_y + tolerance and block_max_y > face_y and
-                block_min_x <= face_x + tolerance and block_max_x >= face_x - tolerance and
-                block_min_z <= face_z + tolerance and block_max_z >= face_z - tolerance):
-                return True
-                
-        elif normal_y < 0:
-            if (block_max_y >= face_y - tolerance and block_min_y < face_y and
-                block_min_x <= face_x + tolerance and block_max_x >= face_x - tolerance and
-                block_min_z <= face_z + tolerance and block_max_z >= face_z - tolerance):
-                return True
-                
-        elif normal_z > 0:
-            if (block_min_z <= face_z + tolerance and block_max_z > face_z and
-                block_min_x <= face_x + tolerance and block_max_x >= face_x - tolerance and
-                block_min_y <= face_y + tolerance and block_max_y >= face_y - tolerance):
-                return True
-                
-        elif normal_z < 0:
-            if (block_max_z >= face_z - tolerance and block_min_z < face_z and
-                block_min_x <= face_x + tolerance and block_max_x >= face_x - tolerance and
-                block_min_y <= face_y + tolerance and block_max_y >= face_y - tolerance):
-                return True
-        
-        return False
-    
-    def create_black_texture(self) -> str:
-        """Create an entirely black texture for hidden faces"""
-
-        black_texture = Image.new('RGBA', (self.head_texture_size, self.head_texture_size), (0, 0, 0, 255))
-
-        buffered = io.BytesIO()
-        black_texture.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-        
-        return f"data:image/png;base64,{img_str}"
-
-    
-    def get_flat_faces(self, total_element_size: Tuple[float, float, float]) -> List[bool]:
+    def _orient_blended_canvas(self, canvas: Image.Image, face_name: str,
+                           total_element_size: Tuple[float, float, float]) -> Image.Image:
         """
-        Returns a list of boolean values indicating if each face is flat (has zero dimension).
-        
-        Args:
-            total_element_size: Tuple of (width, height, depth) dimensions
-            
-        Returns:
-            List of 6 boolean values in order [north, east, south, west, up, down]:
-            - True if the face corresponds to a flat dimension (size = 0)
-            - False if the face has a non-zero dimension
-            
-        Note:
-            - A flat face occurs when one dimension has zero size
-            - For example: if width (X) = 0, then east and west faces are flat
-            - If height (Y) = 0, then up and down faces are flat  
-            - If depth (Z) = 0, then north and south faces are flat
-            
-        Examples:
-            - (0, 2, 2): flat on X-axis -> [False, True, False, True, False, False]
-            - (2, 0, 2): flat on Y-axis -> [False, False, False, False, True, True]  
-            - (2, 2, 0): flat on Z-axis -> [True, False, True, False, False, False]
+        Rotate/flip the 8x8 synthesized side face so it matches Minecraft head orientation.
+        Only applies to thin sides of flat elements. We start with X-flat since that's your case.
+        PIL .rotate() is counter-clockwise.
         """
         width, height, depth = total_element_size
-        
-        # Determine which faces are flat based on zero dimensions
-        # Face order: [north, east, south, west, up, down]
-        faces_flat = [
-            depth == 0,   # north face - flat if Z dimension is 0
-            width == 0,   # east face - flat if X dimension is 0  
-            depth == 0,   # south face - flat if Z dimension is 0
-            width == 0,   # west face - flat if X dimension is 0
-            height == 0,  # up face - flat if Y dimension is 0
-            height == 0   # down face - flat if Y dimension is 0
-        ]
-        
-        return faces_flat
+
+        if width == 0:
+            if face_name == "north":
+                return canvas.rotate(180, expand=False)
+            if face_name == "up":
+                return canvas.rotate(270, expand=False)
+            if face_name == "down":
+                return canvas.rotate(270, expand=False)
+            
+        if depth == 0:
+            if face_name == "east":
+                return canvas.rotate(180, expand=False)
+            if face_name == "up":
+                return canvas.rotate(180, expand=False)
+            if face_name == "down":
+                return canvas.rotate(180, expand=False)
+
+        return canvas
+
+
+    # ---- Blended sides for flat elements ----
+    def _make_blended_side_face(
+        self,
+        face_name: str,
+        source_faces: Dict[str, Any],
+        all_textures: Dict[int, Image.Image],
+        total_element_size: Tuple[float, float, float],
+    ) -> Optional[Image.Image]:
+        """For flat elements, paint thin sides using adjacent faces’ edge colours (half/half)."""
+        width, height, depth = total_element_size
+        mapping = None
+
+        if depth == 0:
+            if face_name in ("east", "west"):
+                mapping = (("north", "right" if face_name == "east" else "left"),
+                           ("south", "right" if face_name == "east" else "left"), "vertical")
+            elif face_name in ("up", "down"):
+                mapping = (("north", "top" if face_name == "up" else "bottom"),
+                           ("south", "top" if face_name == "up" else "bottom"), "horizontal")
+
+        elif width == 0:
+            if face_name in ("north", "south"):
+                mapping = (("west", "right"), ("east", "left"), "vertical")
+            elif face_name in ("up", "down"):
+                mapping = (("west", "top" if face_name == "up" else "bottom"),
+                           ("east", "top" if face_name == "up" else "bottom"), "horizontal")
+
+        elif height == 0:
+            if face_name in ("north", "south"):
+                mapping = (("up", "bottom"), ("down", "top"), "horizontal")
+            elif face_name in ("east", "west"):
+                mapping = (("up", "bottom"), ("down", "top"), "horizontal")
+
+        if mapping is None:
+            self._dbg(f"[blend] {face_name}: mapping not applicable for total={total_element_size}")
+            return None
+
+        (nbr1, edge1), (nbr2, edge2), axis = mapping
+        self._dbg(f"[blend] {face_name}: using neighbours {nbr1}.{edge1} & {nbr2}.{edge2} ({axis})")
+
+        def crop_edge_strip(nbr_face: str, edge: str) -> Optional[Image.Image]:
+            if nbr_face not in source_faces:
+                self._dbg(f"[blend] {face_name}: neighbour '{nbr_face}' missing")
+                return None
+            fdata = source_faces[nbr_face]
+            tid = fdata.get("texture")
+            if tid is None or int(tid) not in all_textures:
+                self._dbg(f"[blend] {face_name}: neighbour '{nbr_face}' texture {tid} not found")
+                return None
+
+            tex = all_textures[int(tid)]
+            u1, v1, u2, v2 = fdata.get("uv", [0, 0, tex.width, tex.height])
+            L, R = min(u1, u2), max(u1, u2)
+            T, B = min(v1, v2), max(v1, v2)
+            L = max(0, int(L)); R = min(tex.width, max(L + 1, int(round(R))))
+            T = max(0, int(T)); B = min(tex.height, max(T + 1, int(round(B))))
+
+            if edge == "left":
+                box = (L, T, L + 1, B)
+            elif edge == "right":
+                box = (R - 1, T, R, B)
+            elif edge == "top":
+                box = (L, T, R, T + 1)
+            elif edge == "bottom":
+                box = (L, B - 1, R, B)
+            else:
+                return None
+
+            if box[2] <= box[0] or box[3] <= box[1]:
+                self._dbg(f"[blend] {face_name}: invalid crop box {box} from {nbr_face}")
+                return None
+            return tex.crop(box)
+
+        s1 = crop_edge_strip(nbr1, edge1)
+        s2 = crop_edge_strip(nbr2, edge2)
+        if s1 is None and s2 is None:
+            self._dbg(f"[blend] {face_name}: both neighbour strips missing; cannot blend")
+            return None
+        if s1 is None:
+            s1 = s2.copy()
+        if s2 is None:
+            s2 = s1.copy()
+
+        canvas = Image.new("RGBA", (8, 8), (0, 0, 0, 0))
+        if axis == "vertical":
+            canvas.paste(s1.resize((4, 8), Image.NEAREST), (0, 0))
+            canvas.paste(s2.resize((4, 8), Image.NEAREST), (4, 0))
+        else:
+            canvas.paste(s1.resize((8, 4), Image.NEAREST), (0, 0))
+            canvas.paste(s2.resize((8, 4), Image.NEAREST), (0, 4))
+
+        canvas = self._orient_blended_canvas(canvas, face_name, total_element_size)
+        return canvas
+
+    # ---- Visibility & utility ----
+    def _paste_black(self, head: Image.Image, region: Tuple[int, int, int, int], msg: str):
+        head.paste(Image.new("RGBA", (8, 8), (0, 0, 0, 255)), region)
+        print(msg)
+
+    def _is_face_visible_for_cube(
+        self,
+        face_name: str,
+        cube_pos: Tuple[float, float, float],
+        cube_size: Tuple[float, float, float],
+        all_cubes: List[Dict[str, Any]],
+    ) -> bool:
+        """Determine if a face is visible for a cube (not hidden by another cube)"""
+        cx, cy, cz = cube_pos
+        cw, ch, cd = cube_size
+
+        if face_name == "north":
+            center = (cx + cw / 2, cy + ch / 2, cz); normal = (0, 0, -1)
+        elif face_name == "south":
+            center = (cx + cw / 2, cy + ch / 2, cz + cd); normal = (0, 0, 1)
+        elif face_name == "west":
+            center = (cx, cy + ch / 2, cz + cd / 2); normal = (-1, 0, 0)
+        elif face_name == "east":
+            center = (cx + cw, cy + ch / 2, cz + cd / 2); normal = (1, 0, 0)
+        elif face_name == "down":
+            center = (cx + cw / 2, cy, cz + cd / 2); normal = (0, -1, 0)
+        elif face_name == "up":
+            center = (cx + cw / 2, cy + ch, cz + cd / 2); normal = (0, 1, 0)
+        else:
+            return True
+
+        for other in all_cubes:
+            if other["position"] == cube_pos and other["size"] == cube_size:
+                continue
+            if self._cube_blocks_face(center, normal, other["position"], other["size"]):
+                print(f"      Face {face_name} blocked by cube at {other['position']}")
+                return False
+        return True
+
+    def _cube_blocks_face(
+        self,
+        face_center: Tuple[float, float, float],
+        face_normal: Tuple[float, float, float],
+        blocking_cube_pos: Tuple[float, float, float],
+        blocking_cube_size: Tuple[float, float, float],
+    ) -> bool:
+        bx, by, bz = blocking_cube_pos
+        bw, bh, bd = blocking_cube_size
+
+        fx, fy, fz = face_center
+        nx, ny, nz = face_normal
+
+        min_x, max_x = bx, bx + bw
+        min_y, max_y = by, by + bh
+        min_z, max_z = bz, bz + bd
+
+        t = 0.1
+        if nx > 0:
+            return (min_x <= fx + t and max_x > fx and min_y <= fy + t and max_y >= fy - t and min_z <= fz + t and max_z >= fz - t)
+        if nx < 0:
+            return (max_x >= fx - t and min_x < fx and min_y <= fy + t and max_y >= fy - t and min_z <= fz + t and max_z >= fz - t)
+        if ny > 0:
+            return (min_y <= fy + t and max_y > fy and min_x <= fx + t and max_x >= fx - t and min_z <= fz + t and max_z >= fz - t)
+        if ny < 0:
+            return (max_y >= fy - t and min_y < fy and min_x <= fx + t and max_x >= fx - t and min_z <= fz + t and max_z >= fz - t)
+        if nz > 0:
+            return (min_z <= fz + t and max_z > fz and min_x <= fx + t and max_x >= fx - t and min_y <= fy + t and max_y >= fy - t)
+        if nz < 0:
+            return (max_z >= fz - t and min_z < fz and min_x <= fx + t and max_x >= fx - t and min_y <= fy + t and max_y >= fy - t)
+        return False
+
+    def create_black_texture(self) -> str:
+        black = Image.new("RGBA", (self.head_texture_size, self.head_texture_size), (0, 0, 0, 255))
+        buf = io.BytesIO()
+        black.save(buf, format="PNG")
+        return f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
+
+    # ---- Flat detection ----
+    def get_flat_faces(self, total_element_size: Tuple[float, float, float]) -> List[bool]:
+        """
+        Return flags [north, east, south, west, up, down] that are flat (dimension == 0).
+        Examples:
+          (0,2,2) → [False, True, False, True,  False, False]
+          (2,0,2) → [False, False, False, False, True,  True]
+          (2,2,0) → [True,  False, True,  False, False, False]
+        """
+        w, h, d = total_element_size
+        return [d == 0, w == 0, d == 0, w == 0, h == 0, h == 0]
