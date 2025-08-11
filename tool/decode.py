@@ -2,6 +2,7 @@ import base64
 import gzip
 import json
 import os
+import sys
 from datetime import datetime
 
 def decode_bdengine_file(file_path):
@@ -69,22 +70,39 @@ def save_decoded_data(data, data_type, original_file_path):
     
     return output_file
 
-file_path = "CuteCreeper.bdengine"
-result, data_type = decode_bdengine_file(file_path)
+def main():
+    """Point d'entrée principal du script"""
+    if len(sys.argv) != 2:
+        print("Usage: python decode.py <file_path>")
+        print("Exemple: python decode.py RotationTest.bdengine")
+        sys.exit(1)
+    
+    file_path = sys.argv[1]
+    
+    # Vérifier si le fichier existe
+    if not os.path.exists(file_path):
+        print(f"Erreur: Le fichier '{file_path}' n'existe pas.")
+        sys.exit(1)
+    
+    print(f"Décodage du fichier: {file_path}")
+    result, data_type = decode_bdengine_file(file_path)
 
-if result:
-    print(f"Type de données: {data_type}")
-    
-    # Sauvegarder dans un fichier JSON
-    output_file = save_decoded_data(result, data_type, file_path)
-    
-    # Afficher un aperçu du contenu
-    print("\nAperçu du contenu décodé:")
-    if data_type == "json":
-        preview = json.dumps(result, indent=2, ensure_ascii=False)
-        print(preview[:500] + "..." if len(preview) > 500 else preview)
-    else:
-        print(result[:500] + "..." if len(result) > 500 else result)
+    if result:
+        print(f"Type de données: {data_type}")
         
-else:
-    print("Échec du décodage")
+        # Sauvegarder dans un fichier JSON
+        output_file = save_decoded_data(result, data_type, file_path)
+        
+        # Afficher un aperçu du contenu
+        print("\nAperçu du contenu décodé:")
+        if data_type == "json":
+            preview = json.dumps(result, indent=2, ensure_ascii=False)
+            print(preview[:500] + "..." if len(preview) > 500 else preview)
+        else:
+            print(result[:500] + "..." if len(result) > 500 else result)
+            
+    else:
+        print("Échec du décodage")
+
+if __name__ == "__main__":
+    main()
