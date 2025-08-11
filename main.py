@@ -4,6 +4,7 @@ import os
 from typing import List
 from config import Config
 from converter import BBModelConverter
+import traceback
 
 class UserInterface:
     """User interface"""
@@ -33,6 +34,7 @@ class UserInterface:
                 print()
                 print(f"✅ Conversion successful! File created: {output_file}")
             except Exception as e:
+                traceback.print_exc()
                 print(f"❌ Conversion error: {e}")
         else:
             print("No file selected.")

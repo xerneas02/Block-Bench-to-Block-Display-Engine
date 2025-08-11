@@ -11,6 +11,7 @@ from conversion_strategy import StretchConversionStrategy, SmartCubeConversionSt
 from texture_manager import MultiTextureManager
 from PIL import Image
 import os
+import io
 
 class BBModelConverter:
     """Main converter"""
@@ -193,12 +194,22 @@ class BBModelConverter:
         print(f"File saved: {output_file}")
         return output_file
 
-    def _convert_element_with_textures(self, element: Dict[str, Any], model_center: List[float], 
-                                       all_textures: Dict[int, Image.Image]) -> List[Dict[str, Any]]:
-        """Convert element with proper texture handling"""
+    def _convert_element_with_textures(
+        self,
+        element: Dict[str, Any],
+        model_center: List[float],
+        all_textures: Dict[int, Image.Image],
+    ) -> List[Dict[str, Any]]:
+        """Convert element with proper texture handling.
+        - If any face UV contains transparent pixels, emulate transparency by emitting
+            thin flat heads only over opaque regions (no UV stretch).
+        - Otherwise, use the normal conversion strategy.
+        """
+
+        # --- (0) Existing behavior: compute the "whole element" composite texture (used by non-transparent path)
         texture_ids = self.texture_manager.get_element_texture_ids(element)
         print(f" Texture use: {texture_ids}")
-        
+
         element_texture = None
         if texture_ids and all_textures:
             element_texture = self.texture_manager.convert_element_texture_to_head(element, all_textures)
@@ -206,10 +217,127 @@ class BBModelConverter:
                 print(f"  ✅ Texture generated for element: {element_texture}")
             else:
                 print(f"  ⚠️ Error generating texture for element: {element.get('name', 'unknown')}")
-    
+
+        # --- (1) Detect faces that actually contain transparency
+        faces = element.get("faces", {})
+        transparent_faces = []
+        for face_name, face in faces.items():
+            tid = face.get("texture")
+            if tid is None:
+                continue
+            try:
+                tid = int(tid)
+            except Exception:
+                continue
+            tex = all_textures.get(tid)
+            if tex is None or tex.mode != "RGBA":
+                continue
+
+            u1, v1, u2, v2 = face.get("uv", [0, 0, tex.width, tex.height])
+            U1, V1 = int(min(u1, u2)), int(min(v1, v2))
+            U2, V2 = int(max(u1, u2)), int(max(v1, v2))
+            sub = tex.crop((U1, V1, U2, V2))
+            if sub.mode != "RGBA":
+                sub = sub.convert("RGBA")
+
+            alpha_band = sub.split()[3]
+            extrema = alpha_band.getextrema()
+            if extrema is None:
+                a_min, a_max = 255, 255
+            else:
+                a_min, a_max = extrema
+
+
+            # If *any* pixel has alpha < 255, we emulate transparency on this face
+            if a_min < 255:
+                transparent_faces.append((face_name, face, tex))
+
+        # --- (2) If any transparent faces → emit flat heads over opaque regions and return early
+        if transparent_faces:
+            print("  ↳ Transparent faces detected; emitting flat heads per opaque region")
+
+            # Element frame (size, bottom corner, rotation/origin)
+            from_pos = element.get("from", [0, 0, 0])
+            to_pos   = element.get("to",   [16, 16, 16])
+            total_size = (
+                to_pos[0] - from_pos[0],
+                to_pos[1] - from_pos[1],
+                to_pos[2] - from_pos[2],
+            )
+            bottom_corner = (
+                min(from_pos[0], to_pos[0]),
+                min(from_pos[1], to_pos[1]),
+                min(from_pos[2], to_pos[2]),
+            )
+            rotation = element.get("rotation", [0, 0, 0])
+            origin   = element.get("origin", from_pos)
+
+            # Helpers
+            from texture_subdivider import TextureSubdivider
+            from head_factory import HeadFactory
+            subdv = TextureSubdivider()
+            hf = HeadFactory()
+
+            heads: List[Dict[str, Any]] = []
+            ALPHA_THRESHOLD = 8   # tweak as needed
+            MIN_RECT_PX     = 1   # increase to 2–3 to reduce tiny fragments
+
+            for face_name, face, tex in transparent_faces:
+                uv = face.get("uv", [0, 0, tex.width, tex.height])
+                rects = subdv._opaque_rects_from_uv(
+                    tex, uv, alpha_threshold=ALPHA_THRESHOLD, min_side=MIN_RECT_PX
+                )
+                print(f"    {face_name}: {len(rects)} opaque rects")
+
+                for r in rects:
+                    # (2a) UV-rect → a thin subcube placed on that face (element-local coords)
+                    res = subdv._subcube_from_uv_rect_on_face(
+                        face_name, r, uv, total_size, flat_thickness=0.011
+                    )
+
+                    if not res:
+                        continue
+
+                    cube_pos, cube_size = res
+
+                    # (2b) Exact face crop for this subcube (no stretch)
+                    face_data = dict(face)  # reuse UV/texture fields
+                    face_tex = subdv._extract_face_texture(
+                        tex, face_data, cube_pos, cube_size, face_name, total_size
+                    )
+                    if face_tex is None:
+                        continue
+
+                    # (2c) Wrap into a head layout with only this one face painted
+                    face_tex = face_tex.resize((8, 8), Image.NEAREST)
+                    head_img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+                    region = subdv.head_face_mapping[face_name]["region"]
+                    head_img.paste(face_tex, region)
+
+                    # (2d) Encode texture as data URL your pipeline expects
+                    buf = io.BytesIO(); head_img.save(buf, format="PNG")
+                    tex_data = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+                    # (2e) Create the head in world space with proper rotation/origin
+                    head = hf.create_subdivided_head_with_element_rotation(
+                        cube_pos, cube_size,
+                        element_bottom_corner=bottom_corner,
+                        element_size=total_size,
+                        element_rotation=rotation,
+                        element_origin=origin,
+                        model_center=model_center,
+                        texture=tex_data
+                    )
+                    heads.append(head)
+
+            # Early return: we fully handled this element via transparency tiling
+            return heads
+
+        # --- (3) No transparency → delegate to normal strategy
         if isinstance(self.strategy, SmartCubeConversionStrategy):
             return self.strategy.convert_element(
                 element, model_center, element_texture, None, None, all_textures
             )
         else:
             return self.strategy.convert_element(element, model_center, element_texture)
+

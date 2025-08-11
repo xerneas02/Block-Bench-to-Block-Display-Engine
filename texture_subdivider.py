@@ -30,6 +30,56 @@ class TextureSubdivider:
             "west": {"region": (16, 8, 24, 16)},   # Left
         }
 
+    def _opaque_rects_from_uv(
+        self, tex: Image.Image, uv: List[int],
+        alpha_threshold: int = 8, min_side: int = 1
+    ) -> List[Tuple[int, int, int, int]]:
+        """Return a list of opaque sub-rectangles (in UV coordinates) for a given texture face."""
+        u1, v1, u2, v2 = uv
+        umin, vmin = int(min(u1, u2)), int(min(v1, v2))
+        umax, vmax = int(max(u1, u2)), int(max(v1, v2))
+        sub_img = tex.crop((umin, vmin, umax, vmax))
+        if sub_img.mode != "RGBA":
+            return [(umin, vmin, umax, vmax)]
+
+        alpha = sub_img.split()[3]
+        opaque_rects = []
+        pixels = alpha.load()
+        width, height = sub_img.size
+
+        visited = [[False] * height for _ in range(width)]
+
+        def flood_fill(x, y):
+            stack = [(x, y)]
+            minx, miny, maxx, maxy = x, y, x, y
+            while stack:
+                cx, cy = stack.pop()
+                if visited[cx][cy]:
+                    continue
+                visited[cx][cy] = True
+                if pixels[cx, cy] >= alpha_threshold:
+                    minx = min(minx, cx)
+                    miny = min(miny, cy)
+                    maxx = max(maxx, cx)
+                    maxy = max(maxy, cy)
+                    for nx, ny in [(cx-1,cy),(cx+1,cy),(cx,cy-1),(cx,cy+1)]:
+                        if 0 <= nx < width and 0 <= ny < height and not visited[nx][ny]:
+                            stack.append((nx, ny))
+            return minx, miny, maxx+1, maxy+1
+
+        for x in range(width):
+            for y in range(height):
+                if not visited[x][y] and pixels[x, y] >= alpha_threshold:
+                    rect = flood_fill(x, y)
+                    if rect[2]-rect[0] >= min_side and rect[3]-rect[1] >= min_side:
+                        # Convert local rect to global UV coords
+                        global_rect = (
+                            umin + rect[0], vmin + rect[1],
+                            umin + rect[2], vmin + rect[3]
+                        )
+                        opaque_rects.append(global_rect)
+        return opaque_rects
+
     # ---- Public APIs ----
     def subdivide_texture_for_cubes(
         self,
@@ -69,6 +119,61 @@ class TextureSubdivider:
             else:
                 out.append(None)
         return out
+    
+    def _subcube_from_uv_rect_on_face(
+        self,
+        face_name: str,
+        uv_rect: Tuple[int, int, int, int],
+        face_uv: Tuple[float, float, float, float],
+        total_element_size: Tuple[float, float, float],
+        flat_thickness: float = 0.011,
+    ) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
+        total_w, total_h, total_d = total_element_size
+        u1, v1, u2, v2 = face_uv
+        U1, V1 = min(u1, u2), min(v1, v2)
+        U2, V2 = max(u1, u2), max(v1, v2)
+
+        ru1, rv1, ru2, rv2 = uv_rect  # <-- tuple unpack
+        nx1 = (ru1 - U1) / (U2 - U1 + 1e-9)
+        ny1 = (rv1 - V1) / (V2 - V1 + 1e-9)
+        nx2 = (ru2 - U1) / (U2 - U1 + 1e-9)
+        ny2 = (rv2 - V1) / (V2 - V1 + 1e-9)
+
+        if face_name == "north":
+            x0, x1 = (1-nx2)*total_w, (1-nx1)*total_w
+            y0, y1 = (1-ny2)*total_h, (1-ny1)*total_h
+            pos  = (x0, y0, 0.0)
+            size = (max(x1-x0, 1e-6), max(y1-y0, 1e-6), flat_thickness)
+        elif face_name == "south":
+            x0, x1 = nx1*total_w, nx2*total_w
+            y0, y1 = (1-ny2)*total_h, (1-ny1)*total_h
+            pos  = (x0, y0, total_d - flat_thickness)
+            size = (max(x1-x0, 1e-6), max(y1-y0, 1e-6), flat_thickness)
+        elif face_name == "west":
+            z0, z1 = nx1*total_d, nx2*total_d
+            y0, y1 = (1-ny2)*total_h, (1-ny1)*total_h
+            pos  = (0.0, y0, z0)
+            size = (flat_thickness, max(y1-y0, 1e-6), max(z1-z0, 1e-6))
+        elif face_name == "east":
+            z0, z1 = (1-nx2)*total_d, (1-nx1)*total_d
+            y0, y1 = (1-ny2)*total_h, (1-ny1)*total_h
+            pos  = (total_w - flat_thickness, y0, z0)
+            size = (flat_thickness, max(y1-y0, 1e-6), max(z1-z0, 1e-6))
+        elif face_name == "down":
+            x0, x1 = (1-nx2)*total_w, (1-nx1)*total_w
+            z0, z1 = (1-ny2)*total_d, (1-ny1)*total_d
+            pos  = (x0, 0.0, z0)
+            size = (max(x1-x0, 1e-6), flat_thickness, max(z1-z0, 1e-6))
+        elif face_name == "up":
+            x0, x1 = (1-nx2)*total_w, (1-nx1)*total_w
+            z0, z1 = ny1*total_d, ny2*total_d
+            pos  = (x0, total_h - flat_thickness, z0)
+            size = (max(x1-x0, 1e-6), flat_thickness, max(z1-z0, 1e-6))
+        else:
+            pos, size = (0, 0, 0), (0, 0, 0)
+
+        return pos, size
+
 
     def subdivide_texture_for_cubes_with_individual_textures(
         self,
@@ -342,13 +447,15 @@ class TextureSubdivider:
             if face_name == "down":
                 return canvas.rotate(270, expand=False)
             
+            
         if depth == 0:
             if face_name == "east":
-                return canvas.rotate(180, expand=False)
+                return canvas.transpose(Image.FLIP_TOP_BOTTOM).rotate(180, expand=False)
             if face_name == "up":
-                return canvas.rotate(180, expand=False)
+                return canvas.transpose(Image.FLIP_LEFT_RIGHT).rotate(180, expand=False)
             if face_name == "down":
-                return canvas.rotate(180, expand=False)
+                return canvas.transpose(Image.FLIP_LEFT_RIGHT).rotate(180, expand=False)
+            
 
         return canvas
 
@@ -361,17 +468,24 @@ class TextureSubdivider:
         all_textures: Dict[int, Image.Image],
         total_element_size: Tuple[float, float, float],
     ) -> Optional[Image.Image]:
-        """For flat elements, paint thin sides using adjacent faces’ edge colours (half/half)."""
+        """For flat elements, paint thin sides using adjacent faces' edge colours (half/half)."""
         width, height, depth = total_element_size
         mapping = None
 
         if depth == 0:
             if face_name in ("east", "west"):
-                mapping = (("north", "right" if face_name == "east" else "left"),
-                           ("south", "right" if face_name == "east" else "left"), "vertical")
+                mapping = (
+                    ("north", "left"  if face_name == "east" else "right"),
+                    ("south", "left"  if face_name == "east" else "right"),
+                    "vertical",
+                )
             elif face_name in ("up", "down"):
-                mapping = (("north", "top" if face_name == "up" else "bottom"),
-                           ("south", "top" if face_name == "up" else "bottom"), "horizontal")
+                mapping = (
+                    ("north", "top"    if face_name == "up" else "bottom"),
+                    ("south", "top"    if face_name == "up" else "bottom"),
+                    "horizontal",
+        )
+
 
         elif width == 0:
             if face_name in ("north", "south"):
