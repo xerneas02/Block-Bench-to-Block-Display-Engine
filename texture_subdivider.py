@@ -780,6 +780,7 @@ class TextureSubdivider:
                                                         all_textures: Dict[int, Image.Image]) -> Optional[Image.Image]:
         """Create a head texture for a specific cube with individual face textures"""
         
+        print(f"\nProcessing cube {cube_index + 1}:")
         cube_pos = cube_division["position"]
         cube_size = cube_division["size"]
         
@@ -1446,3 +1447,42 @@ class TextureSubdivider:
         img_str = base64.b64encode(buffered.getvalue()).decode()
         
         return f"data:image/png;base64,{img_str}"
+
+    
+    def get_flat_faces(self, total_element_size: Tuple[float, float, float]) -> List[bool]:
+        """
+        Returns a list of boolean values indicating if each face is flat (has zero dimension).
+        
+        Args:
+            total_element_size: Tuple of (width, height, depth) dimensions
+            
+        Returns:
+            List of 6 boolean values in order [north, east, south, west, up, down]:
+            - True if the face corresponds to a flat dimension (size = 0)
+            - False if the face has a non-zero dimension
+            
+        Note:
+            - A flat face occurs when one dimension has zero size
+            - For example: if width (X) = 0, then east and west faces are flat
+            - If height (Y) = 0, then up and down faces are flat  
+            - If depth (Z) = 0, then north and south faces are flat
+            
+        Examples:
+            - (0, 2, 2): flat on X-axis -> [False, True, False, True, False, False]
+            - (2, 0, 2): flat on Y-axis -> [False, False, False, False, True, True]  
+            - (2, 2, 0): flat on Z-axis -> [True, False, True, False, False, False]
+        """
+        width, height, depth = total_element_size
+        
+        # Determine which faces are flat based on zero dimensions
+        # Face order: [north, east, south, west, up, down]
+        faces_flat = [
+            depth == 0,   # north face - flat if Z dimension is 0
+            width == 0,   # east face - flat if X dimension is 0  
+            depth == 0,   # south face - flat if Z dimension is 0
+            width == 0,   # west face - flat if X dimension is 0
+            height == 0,  # up face - flat if Y dimension is 0
+            height == 0   # down face - flat if Y dimension is 0
+        ]
+        
+        return faces_flat

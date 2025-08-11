@@ -3,3 +3,4 @@
 decoded_bdengine/
 *.pyc
 minecraft-hologram-main/
+__pycache__/
