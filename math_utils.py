@@ -19,8 +19,6 @@ class MathUtils:
         cos_x, sin_x = math.cos(rx), math.sin(rx)
         cos_y, sin_y = math.cos(ry), math.sin(ry)
         cos_z, sin_z = math.cos(rz), math.sin(rz)
-        
-        # Blockbench rotation order: Z * X * Y (applied right to left)
 
         Ry = np.array([
             [cos_y, 0, sin_y, 0],

@@ -9,18 +9,16 @@ from PIL import Image
 class TextureSubdivider:
     """Divide textures for multiple heads with correct face mapping and orientation"""
 
-    # ---- Debug ----
     debug = True
 
     def _dbg(self, msg: str):
         if getattr(self, "debug", False):
             print(msg)
 
-    # ---- Init / layout ----
     def __init__(self):
         self.head_texture_size = 64
         self.head_active_area = 32
-        # Java head layout
+
         self.head_face_mapping = {
             "up": {"region": (8, 0, 16, 8)},       # Top
             "down": {"region": (16, 0, 24, 8)},    # Bottom
@@ -72,7 +70,6 @@ class TextureSubdivider:
                 if not visited[x][y] and pixels[x, y] >= alpha_threshold:
                     rect = flood_fill(x, y)
                     if rect[2]-rect[0] >= min_side and rect[3]-rect[1] >= min_side:
-                        # Convert local rect to global UV coords
                         global_rect = (
                             umin + rect[0], vmin + rect[1],
                             umin + rect[2], vmin + rect[3]
@@ -80,7 +77,6 @@ class TextureSubdivider:
                         opaque_rects.append(global_rect)
         return opaque_rects
 
-    # ---- Public APIs ----
     def subdivide_texture_for_cubes(
         self,
         source_texture: Image.Image,
@@ -133,7 +129,7 @@ class TextureSubdivider:
         U1, V1 = min(u1, u2), min(v1, v2)
         U2, V2 = max(u1, u2), max(v1, v2)
 
-        ru1, rv1, ru2, rv2 = uv_rect  # <-- tuple unpack
+        ru1, rv1, ru2, rv2 = uv_rect
         nx1 = (ru1 - U1) / (U2 - U1 + 1e-9)
         ny1 = (rv1 - V1) / (V2 - V1 + 1e-9)
         nx2 = (ru2 - U1) / (U2 - U1 + 1e-9)
@@ -218,7 +214,6 @@ class TextureSubdivider:
                 out.append(None)
         return out
 
-    # ---- Core creators ----
     def _create_texture_for_cube(
         self,
         source_texture: Image.Image,
@@ -244,7 +239,6 @@ class TextureSubdivider:
                 self._paste_black(head, face_info["region"], f"Face {face_name}: ⬛ (hidden)")
                 continue
 
-            # Extract and paste
             tex = self._extract_face_texture(
                 source_texture, source_faces[face_name], cube_pos, cube_size, face_name, total_element_size
             )
@@ -271,7 +265,7 @@ class TextureSubdivider:
 
         head = Image.new("RGBA", (self.head_texture_size, self.head_texture_size), (0, 0, 0, 0))
 
-        flat_flags = self.get_flat_faces(total_element_size)  # [N,E,S,W,U,D]
+        flat_flags = self.get_flat_faces(total_element_size)
         face_order = ["north", "east", "south", "west", "up", "down"]
         print(f"Flat flags: {flat_flags} (is_flat={any(flat_flags)})")
 
@@ -287,19 +281,20 @@ class TextureSubdivider:
             face_data = source_faces[face_name]
             texture_id = face_data.get("texture")
 
-            # First: if flat element and this face is a thin side → blended paint
             try:
                 idx = face_order.index(face_name)
             except ValueError:
                 idx = -1
             if idx >= 0 and any(flat_flags) and not flat_flags[idx]:
-                blended = self._make_blended_side_face(face_name, source_faces, all_textures, total_element_size)
+                blended = self._make_blended_side_face(
+                        face_name, source_faces, all_textures,
+                        total_element_size, cube_pos, cube_size
+                    )
                 if blended is not None:
                     head.paste(blended.resize((8, 8), Image.NEAREST), face_info["region"])
                     print(f"Face {face_name}: 🎨 blended from adjacent edges (flat element)")
-                    continue  # skip normal extraction
+                    continue
 
-            # Fallback: normal extraction
             if texture_id is None or int(texture_id) not in all_textures:
                 self._paste_black(head, face_info["region"], f"Face {face_name}: ⬛ (texture {texture_id} not found)")
                 continue
@@ -315,7 +310,6 @@ class TextureSubdivider:
                 self._paste_black(head, face_info["region"], f"Face {face_name}: ⬛ (extraction error texture {texture_id})")
         return head
 
-    # ---- Extraction helpers ----
     def _extract_face_texture(
         self,
         face_source_texture: Image.Image,
@@ -373,7 +367,6 @@ class TextureSubdivider:
         self._dbg(f"      Total size: {total_element_size}")
         self._dbg(f"      UV original: {uv_width}x{uv_height}")
 
-        # Compute ratios safely
         if face_name == "north":
             x0 = self._safe_div((total_w - cube_x - cube_w), total_w, "total_w")
             x1 = self._safe_div((total_w - cube_x), total_w, "total_w")
@@ -427,6 +420,12 @@ class TextureSubdivider:
             print(f"      Invalid region: ({final_left}, {final_top}, {final_right}, {final_bottom})")
             return None
 
+        if final_right == final_left:
+            final_right = min(source_texture.width, final_left + 1)
+
+        if final_bottom == final_top:
+            final_bottom = min(source_texture.height, final_top + 1)
+
         self._dbg(f"      Final mapping ({face_name}): ({final_left}, {final_top}, {final_right}, {final_bottom})")
         return final_left, final_top, final_right, final_bottom
 
@@ -466,15 +465,15 @@ class TextureSubdivider:
 
         return canvas
 
-
-    # ---- Blended sides for flat elements ----
     def _make_blended_side_face(
-        self,
-        face_name: str,
-        source_faces: Dict[str, Any],
-        all_textures: Dict[int, Image.Image],
-        total_element_size: Tuple[float, float, float],
-    ) -> Optional[Image.Image]:
+            self,
+            face_name: str,
+            source_faces: Dict[str, Any],
+            all_textures: Dict[int, Image.Image],
+            total_element_size: Tuple[float, float, float],
+            cube_pos: Tuple[float, float, float],
+            cube_size: Tuple[float, float, float],
+        ) -> Optional[Image.Image]:
         """For flat elements, paint thin sides using adjacent faces' edge colours (half/half)."""
         width, height, depth = total_element_size
         mapping = None
@@ -521,10 +520,11 @@ class TextureSubdivider:
         (nbr1, edge1), (nbr2, edge2), axis = mapping
         self._dbg(f"[blend] {face_name}: using neighbours {nbr1}.{edge1} & {nbr2}.{edge2} ({axis})")
 
-        def crop_edge_strip(nbr_face: str, edge: str) -> Optional[Image.Image]:
+        def crop_edge_strip_local(nbr_face: str, edge: str) -> Optional[Image.Image]:
             if nbr_face not in source_faces:
                 self._dbg(f"[blend] {face_name}: neighbour '{nbr_face}' missing")
                 return None
+
             fdata = source_faces[nbr_face]
             tid = fdata.get("texture")
             if tid is None or int(tid) not in all_textures:
@@ -533,10 +533,21 @@ class TextureSubdivider:
 
             tex = all_textures[int(tid)]
             u1, v1, u2, v2 = fdata.get("uv", [0, 0, tex.width, tex.height])
-            L, R = min(u1, u2), max(u1, u2)
-            T, B = min(v1, v2), max(v1, v2)
-            L = max(0, int(L)); R = min(tex.width, max(L + 1, int(round(R))))
-            T = max(0, int(T)); B = min(tex.height, max(T + 1, int(round(B))))
+            left, right = min(u1, u2), max(u1, u2)
+            top, bottom = min(v1, v2), max(v1, v2)
+
+            sub = self._calculate_face_region_for_cube_exact(
+                (left, top, right, bottom),
+                cube_pos, cube_size,
+                nbr_face,
+                total_element_size,
+                tex,
+            )
+            if sub is None:
+                self._dbg(f"[blend] {face_name}: neighbour '{nbr_face}' mapping failed")
+                return None
+
+            L, T, R, B = sub
 
             if edge == "left":
                 box = (L, T, L + 1, B)
@@ -550,12 +561,14 @@ class TextureSubdivider:
                 return None
 
             if box[2] <= box[0] or box[3] <= box[1]:
-                self._dbg(f"[blend] {face_name}: invalid crop box {box} from {nbr_face}")
+                self._dbg(f"[blend] {face_name}: invalid cube-local box {box} from {nbr_face}")
                 return None
+
             return tex.crop(box)
 
-        s1 = crop_edge_strip(nbr1, edge1)
-        s2 = crop_edge_strip(nbr2, edge2)
+
+        s1 = crop_edge_strip_local(nbr1, edge1)
+        s2 = crop_edge_strip_local(nbr2, edge2)
         if s1 is None and s2 is None:
             self._dbg(f"[blend] {face_name}: both neighbour strips missing; cannot blend")
             return None
@@ -575,7 +588,6 @@ class TextureSubdivider:
         canvas = self._orient_blended_canvas(canvas, face_name, total_element_size)
         return canvas
 
-    # ---- Visibility & utility ----
     def _paste_black(self, head: Image.Image, region: Tuple[int, int, int, int], msg: str):
         head.paste(Image.new("RGBA", (8, 8), (0, 0, 0, 255)), region)
         print(msg)
@@ -652,7 +664,6 @@ class TextureSubdivider:
         black.save(buf, format="PNG")
         return f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
 
-    # ---- Flat detection ----
     def get_flat_faces(self, total_element_size: Tuple[float, float, float]) -> List[bool]:
         """
         Return flags [north, east, south, west, up, down] that are flat (dimension == 0).

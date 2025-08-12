@@ -40,8 +40,90 @@ class SmartCubeOptimizer:
         
         return stretch_decomposition
     
-    def calculate_optimal_3d_decomposition(self, width: float, height: float, depth: float, 
-                                         element: Dict[str, Any], source_texture_size: Tuple[int, int] = None) -> List[Dict[str, Any]]:
+    def _face_span_units(self, face_name: str, width: float, height: float, depth: float) -> Tuple[float, float]:
+        if face_name == "north" or face_name == "south":
+            return (width, height)
+        if face_name == "east" or face_name == "west":
+            return (depth, height)
+        if face_name == "up" or face_name == "down":
+            return (width, depth)
+        return (1.0, 1.0)
+
+    def _axis_density_hint(self, element: Dict[str, Any], all_textures) -> Dict[str, float]:
+        """
+        Return per-axis desired units-per-8px, derived from the largest pixel density seen on faces
+        touching that axis. Example: if a north face uses 32px over 16 units in X => 2 px/unit,
+        so a good step is ~ 8/2 = 4 units per head in X.
+        """
+        if not all_textures:
+            return {}
+
+        faces = element.get("faces", {})
+        hints = {"x": None, "y": None, "z": None}
+
+        def upd(axis, step):
+            if step <= 0: return
+            if hints[axis] is None or step < hints[axis]:
+                hints[axis] = step
+
+        for fname, fdata in faces.items():
+            tid = fdata.get("texture")
+            if tid is None: continue
+            try:
+                tid = int(tid)
+            except Exception:
+                continue
+            tex = all_textures.get(tid)
+            if tex is None: continue
+
+            u1, v1, u2, v2 = fdata.get("uv", [0, 0, tex.width, tex.height])
+            px_u = max(1, abs(int(u2 - u1)))
+            px_v = max(1, abs(int(v2 - v1)))
+
+            w, h, d = element.get("to", [16,16,16])
+            fx, fy, fz = element.get("from", [0,0,0])
+            width  = abs(w - fx); height = abs(h - fy); depth = abs(d - fz)
+
+            span_u, span_v = self._face_span_units(fname, width, height, depth)
+            ppu_u = px_u / max(span_u, 1e-6)
+            ppu_v = px_v / max(span_v, 1e-6)
+
+            step_u = max(1.0, 8.0 / max(ppu_u, 1e-6))
+            step_v = max(1.0, 8.0 / max(ppu_v, 1e-6))
+
+            if fname in ("north","south"):
+                upd("x", step_u); upd("y", step_v)
+            elif fname in ("east","west"):
+                upd("z", step_u); upd("y", step_v)
+            elif fname in ("up","down"):
+                upd("x", step_u); upd("z", step_v)
+
+        return {k:v for k,v in hints.items() if v is not None}
+
+    def _refine_divisions(self, total: float, base_divs: List[float], step_hint: Optional[float]) -> List[float]:
+        """
+        Take existing divisions on one axis and, if we have a step hint (units per ~8px),
+        split those chunks into near-multiples of that step to follow stretched UVs.
+        """
+        if step_hint is None or step_hint <= 0:
+            return base_divs
+
+        out = []
+        for seg in base_divs:
+            remaining = seg
+            cand = max(1.0, round(step_hint))
+            while remaining > 1e-6:
+                step = min(cand, remaining)
+                out.append(step)
+                remaining -= step
+        if abs(sum(out) - sum(base_divs)) > 1e-6:
+            out[-1] += (sum(base_divs) - sum(out))
+        return out
+
+    
+    def calculate_optimal_3d_decomposition(self, width: float, height: float, depth: float,
+                                       element: Dict[str, Any], source_texture_size: Tuple[int, int] = None,
+                                       all_textures: Optional[Dict[int, Any]] = None) -> List[Dict[str, Any]]:
         """Compute the optimal 3D decomposition of a cube with intelligent handling of flat surfaces and controlled stretching."""
         
         print(f"\n=== Smart decomposition for {width}x{height}x{depth} ===")
@@ -70,25 +152,124 @@ class SmartCubeOptimizer:
         
         print(f"Generating {len(cubes)} cubes")
         
-        return cubes
-    
-    def _handle_flat_surface(self, width: float, height: float, depth: float, 
-                           flat_dimensions: List[str], element: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Handle flat surfaces by converting 0 dimensions to minimum thickness"""
-        converted_width = self.flat_thickness if width == 0 else width
-        converted_height = self.flat_thickness if height == 0 else height  
-        converted_depth = self.flat_thickness if depth == 0 else depth
+        x_divs = self._get_divisions_from_analysis(x_analysis, width)
+        y_divs = self._get_divisions_from_analysis(y_analysis, height)
+        z_divs = self._get_divisions_from_analysis(z_analysis, depth)
 
-        return [{
-            "position": (0, 0, 0),
-            "size": (converted_width, converted_height, converted_depth),
-            "is_perfect_cube": False,
-            "is_flat_surface": True,
-            "flat_dimensions": flat_dimensions,
-            "original_size": (width, height, depth),
-            "source_element": element,
-            "requires_texture": True
-        }]
+        hints = self._axis_density_hint(element, all_textures)
+        x_divs = self._refine_divisions(width,  x_divs, hints.get("x"))
+        y_divs = self._refine_divisions(height, y_divs, hints.get("y"))
+        z_divs = self._refine_divisions(depth,  z_divs, hints.get("z"))
+        
+        cubes = []
+        x_pos = 0.0
+        for dx in x_divs:
+            y_pos = 0.0
+            for dy in y_divs:
+                z_pos = 0.0
+                for dz in z_divs:
+                    cubes.append({
+                        "position": (x_pos, y_pos, z_pos),
+                        "size": (dx, dy, dz),
+                        "cube_size": min(dx, dy, dz),
+                        "is_perfect_cube": (dx == dy == dz),
+                        "texture_resolution": min(dx, dy, dz),
+                        "requires_texture": True,
+                        "source_element": element,
+                    })
+                    z_pos += dz
+                y_pos += dy
+            x_pos += dx
+
+        print(f"Generating {len(cubes)} cubes (UV-aware)")
+        return cubes
+
+    
+    def _handle_flat_surface(self, width: float, height: float, depth: float,
+                         flat_dimensions: List[str], element: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Subdivide a flat element into a grid along the two non-flat axes.
+        Keep the flat axis at self.flat_thickness for BDEngine, so textures don't stretch."""
+        cubes: List[Dict[str, Any]] = []
+
+        if depth == 0:
+            thick = self.flat_thickness
+            x_analysis = self.analyze_dimension(width)
+            y_analysis = self.analyze_dimension(height)
+            x_divs = self._get_divisions_from_analysis(x_analysis, width)
+            y_divs = self._get_divisions_from_analysis(y_analysis, height)
+
+            x_pos = 0.0
+            for x_size in x_divs:
+                y_pos = 0.0
+                for y_size in y_divs:
+                    cubes.append({
+                        "position": (x_pos, y_pos, 0.0),
+                        "size": (x_size, y_size, thick),
+                        "cube_size": min(x_size, y_size, thick),
+                        "is_perfect_cube": (x_size == y_size == thick),
+                        "texture_resolution": min(x_size, y_size),
+                        "requires_texture": True,
+                        "source_element": element,
+                        "is_flat_surface": True,
+                        "flat_dimensions": flat_dimensions,
+                        "original_size": (width, height, depth),
+                    })
+                    y_pos += y_size
+                x_pos += x_size
+
+        elif width == 0:
+            thick = self.flat_thickness
+            y_analysis = self.analyze_dimension(height)
+            z_analysis = self.analyze_dimension(depth)
+            y_divs = self._get_divisions_from_analysis(y_analysis, height)
+            z_divs = self._get_divisions_from_analysis(z_analysis, depth)
+
+            y_pos = 0.0
+            for y_size in y_divs:
+                z_pos = 0.0
+                for z_size in z_divs:
+                    cubes.append({
+                        "position": (0.0, y_pos, z_pos),
+                        "size": (thick, y_size, z_size),
+                        "cube_size": min(thick, y_size, z_size),
+                        "is_perfect_cube": (thick == y_size == z_size),
+                        "texture_resolution": min(y_size, z_size),
+                        "requires_texture": True,
+                        "source_element": element,
+                        "is_flat_surface": True,
+                        "flat_dimensions": flat_dimensions,
+                        "original_size": (width, height, depth),
+                    })
+                    z_pos += z_size
+                y_pos += y_size
+
+        elif height == 0:
+            thick = self.flat_thickness
+            x_analysis = self.analyze_dimension(width)
+            z_analysis = self.analyze_dimension(depth)
+            x_divs = self._get_divisions_from_analysis(x_analysis, width)
+            z_divs = self._get_divisions_from_analysis(z_analysis, depth)
+
+            x_pos = 0.0
+            for x_size in x_divs:
+                z_pos = 0.0
+                for z_size in z_divs:
+                    cubes.append({
+                        "position": (x_pos, 0.0, z_pos),
+                        "size": (x_size, thick, z_size),
+                        "cube_size": min(x_size, thick, z_size),
+                        "is_perfect_cube": (x_size == thick == z_size),
+                        "texture_resolution": min(x_size, z_size),
+                        "requires_texture": True,
+                        "source_element": element,
+                        "is_flat_surface": True,
+                        "flat_dimensions": flat_dimensions,
+                        "original_size": (width, height, depth),
+                    })
+                    z_pos += z_size
+                x_pos += x_size
+
+        return cubes
     
     def _get_divisions_from_analysis(self, analysis: Dict[str, Any], dimension: float) -> List[float]:
         """Extract divisions from dimension analysis"""

@@ -67,8 +67,10 @@ class SmartCubeConversionStrategy(ConversionStrategy):
         print(f"Original shape: {info['width']}x{info['height']}x{info['depth']}")
         
         cube_divisions = self.smart_optimizer.calculate_optimal_3d_decomposition(
-            info['width'], info['height'], info['depth'], element, source_texture_size
+            info['width'], info['height'], info['depth'],
+            element, source_texture_size, all_textures
         )
+
         
         cube_textures = []
         if all_textures is not None:
