@@ -441,11 +441,11 @@ class TextureSubdivider:
 
         if width == 0:
             if face_name == "north":
-                return canvas.rotate(180, expand=False)
+                return canvas.rotate(180, expand=False).transpose(Image.FLIP_TOP_BOTTOM)
             if face_name == "up":
-                return canvas.rotate(270, expand=False)
+                return canvas.rotate(270, expand=False).transpose(Image.FLIP_TOP_BOTTOM)
             if face_name == "down":
-                return canvas.rotate(270, expand=False)
+                return canvas.rotate(270, expand=False).transpose(Image.FLIP_TOP_BOTTOM)
             
             
         if depth == 0:
@@ -456,6 +456,13 @@ class TextureSubdivider:
             if face_name == "down":
                 return canvas.transpose(Image.FLIP_LEFT_RIGHT).rotate(180, expand=False)
             
+        if height == 0:
+            if face_name == "south":
+                return canvas.transpose(Image.FLIP_LEFT_RIGHT)
+            if face_name == "east":
+                return canvas.rotate(270, expand=False).transpose(Image.FLIP_LEFT_RIGHT)
+            if face_name == "west":
+                return canvas.rotate(270, expand=False)
 
         return canvas
 
@@ -488,17 +495,24 @@ class TextureSubdivider:
 
 
         elif width == 0:
-            if face_name in ("north", "south"):
+            if face_name == "south":
                 mapping = (("west", "right"), ("east", "left"), "vertical")
+            if face_name == "north":
+                mapping = (("west", "left"), ("east", "right"), "vertical")
             elif face_name in ("up", "down"):
                 mapping = (("west", "top" if face_name == "up" else "bottom"),
                            ("east", "top" if face_name == "up" else "bottom"), "horizontal")
 
         elif height == 0:
-            if face_name in ("north", "south"):
-                mapping = (("up", "bottom"), ("down", "top"), "horizontal")
-            elif face_name in ("east", "west"):
-                mapping = (("up", "bottom"), ("down", "top"), "horizontal")
+            if face_name == "south":
+                mapping = (("up", "top"), ("down", "top"), "horizontal")
+            elif face_name == "north":
+                mapping = (("up", "bottom"), ("down", "bottom"), "horizontal")
+            elif face_name == "west":
+                mapping = (("up", "right"), ("down", "right"), "vertical")
+            elif face_name == "east":
+                mapping = (("up", "left"), ("down", "left"), "vertical")
+
 
         if mapping is None:
             self._dbg(f"[blend] {face_name}: mapping not applicable for total={total_element_size}")
