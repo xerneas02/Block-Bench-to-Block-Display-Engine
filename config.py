@@ -14,7 +14,7 @@ class Config:
         "cube": "Decompose into optimized cubes"
     }
     
-    DEFAULT_MODE = "stretch"
+    DEFAULT_MODE = "cube"
     
     # BDEngine parameters
     MIN_SCALE = 0.0011  # Minimum scale required by BDEngine

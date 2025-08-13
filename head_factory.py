@@ -178,3 +178,47 @@ class HeadFactory:
         img_str = base64.b64encode(buffered.getvalue()).decode()
         
         return f"data:image/png;base64,{img_str}"
+    
+    def create_local_subcube_head(self,
+                                  cube_pos: Tuple[float, float, float],
+                                  cube_size: Tuple[float, float, float],
+                                  element_bottom_corner: Tuple[float, float, float],
+                                  element_origin: Tuple[float, float, float],
+                                  texture: str = None) -> Dict[str, Any]:
+        """
+        Create a head for a subcube without applying element rotation or global translation.
+        Translation is local (pre-rotation) relative to element origin.
+        The local translation uses the same convention (top center) as standard heads,
+        but measured in element-local (unrotated) space.
+        """
+        cube_x = element_bottom_corner[0] + cube_pos[0]
+        cube_y = element_bottom_corner[1] + cube_pos[1]
+        cube_z = element_bottom_corner[2] + cube_pos[2]
+
+        cube_w, cube_h, cube_d = cube_size
+
+        top_center_x = cube_x + cube_w * 0.5
+        top_center_y = cube_y + cube_h
+        top_center_z = cube_z + cube_d * 0.5
+
+        # Local (pre-rotation) offset relative to origin, converted to head units (blocks)
+        local_tx = (top_center_x - element_origin[0]) / 16.0
+        local_ty = (top_center_y - element_origin[1]) / 16.0
+        local_tz = (top_center_z - element_origin[2]) / 16.0
+
+        scale_x = max(cube_w / self.config.HEAD_SIZE, self.config.MIN_SCALE)
+        scale_y = max(cube_h / self.config.HEAD_SIZE, self.config.MIN_SCALE)
+        scale_z = max(cube_d / self.config.HEAD_SIZE, self.config.MIN_SCALE)
+
+        transforms = [
+            scale_x, 0, 0, local_tx,
+            0, scale_y, 0, local_ty,
+            0, 0, scale_z, local_tz,
+            0, 0, 0, 1
+        ]
+
+        head_element = self.config.get_head_base_structure()
+        head_element["transforms"] = transforms
+        if texture is not None:
+            head_element["paintTexture"] = texture
+        return head_element

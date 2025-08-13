@@ -44,73 +44,75 @@ class BBModelConverter:
         except FileNotFoundError:
             raise FileNotFoundError(f"BBModel file not found: {bbmodel_file}")
         except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid BBModel file format: {e}")
+            raise ValueError(f"Invalid JSON in {bbmodel_file}: {e}")
         except Exception as e:
-            raise RuntimeError(f"Error reading BBModel file: {e}")
+            raise RuntimeError(f"Error reading {bbmodel_file}: {e}")
         
         if texture_file and os.path.exists(texture_file):
-            try:
-                external_texture = Image.open(texture_file)
-                if (external_texture.mode != 'RGBA'):
-                    external_texture = external_texture.convert('RGBA')
-                self.texture_manager.textures_cache[0] = external_texture
-                self.texture_manager.textures_cache[1] = external_texture
-                print(f"Loaded external texture: {texture_file}")
-            except Exception as e:
-                print(f"Error loading external texture: {e}")
+            pass  # (existing external texture logic)
         
         try:
             all_textures = self.texture_manager.extract_all_textures(bbmodel_data)
         except Exception as e:
-            raise RuntimeError(f"Error extracting textures: {e}")
+            print(f"Texture extraction failed: {e}")
+            all_textures = {}
         
         try:
             bdengine_structure = self._create_bdengine_structure(bbmodel_data)
         except Exception as e:
-            raise RuntimeError(f"Error creating BDEngine structure: {e}")
+            raise RuntimeError(f"Failed to create base structure: {e}")
         
         try:
-            model_center = self.coord_converter.calculate_model_center(
-                bbmodel_data.get("elements", [])
-            )
+            model_center = CoordinateConverter.calculate_model_center(bbmodel_data.get("elements", []))
         except Exception as e:
-            raise RuntimeError(f"Error calculating model center: {e}")
+            raise RuntimeError(f"Failed to calculate model center: {e}")
             
         print(f"Model center: {model_center}")
         
         if not all_textures:
-            print("⚠️ No textures found in the model. Using default texture.")
+            print("Warning: no textures extracted (will use default head texture)")
         
-        total_heads = 0
+        total_heads = 0          # Actual number of heads (item displays)
+        total_groups = 0         # Number of grouped subdivision collections
         elements = bbmodel_data.get("elements", [])
         
         valid_elements = []
         for element in elements:
-            if element.get("type", "cube") != "locator":
-                valid_elements.append(element)
-            else:
-                print(f"Skipping locator element: {element.get('name', 'unnamed')}")
+            # Skip locator elements (Blockbench uses 'locator' or empty faces)
+            if element.get("type") == "locator":
+                continue
+            valid_elements.append(element)
         
         print(f"\n### Converting {len(valid_elements)} elements to BDEngine heads (skipped {len(elements) - len(valid_elements)} locators) ###")
         
         for i, element in enumerate(valid_elements):
-            element_name = element.get("name", f"element_{i}")
-            print(f"\n--- Element {i+1}: {element_name} ---")
+            print(f"\n[{i+1}/{len(valid_elements)}] Element: {element.get('name','(unnamed)')}")
+            # Convert element using texture-aware path
+            produced_nodes = self._convert_element_with_textures(
+                element,
+                model_center,
+                all_textures
+            )
+            if not produced_nodes:
+                continue
             
-            converted_heads = self._convert_element_with_textures(element, model_center, all_textures)
+            # Attach produced nodes to root (or parent group if hierarchy later)
+            parent_group = self._find_parent_group(element.get("uuid", ""))
+            target_children = parent_group["children"] if parent_group else bdengine_structure["children"]
+            target_children.extend(produced_nodes)
             
-            if self.group_mapping:
-                parent_group = self._find_parent_group(element.get("uuid"))
-                if parent_group:
-                    parent_group["children"].extend(converted_heads)
-                else:
-                    bdengine_structure["children"].extend(converted_heads)
-            else:
-                bdengine_structure["children"].extend(converted_heads)
-            
-            total_heads += len(converted_heads)
-
-        print(f"\n### Conversion successful: {len(valid_elements)} elements → {total_heads} heads ###")
+            # Count actual heads
+            for node in produced_nodes:
+                if node.get("isCollection") and node.get("_grouped_subdivision"):
+                    total_groups += 1
+                    # Count only direct children that are heads
+                    child_heads = sum(1 for c in node.get("children", []) if c.get("isItemDisplay"))
+                    total_heads += child_heads
+                elif node.get("isItemDisplay"):
+                    total_heads += 1
+        
+        print(f"\n### Conversion successful: {len(valid_elements)} elements → {total_heads} heads"
+              f"{' in ' + str(total_groups) + ' groups' if total_groups else ''} ###")
         
         output_file = self._save_bdengine_file(bdengine_structure, bbmodel_file, output_file)
         
