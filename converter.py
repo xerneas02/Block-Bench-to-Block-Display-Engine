@@ -12,6 +12,8 @@ from texture_manager import MultiTextureManager
 from PIL import Image
 import os
 import io
+from math_utils import MathUtils
+import numpy as np
 
 class BBModelConverter:
     """Main converter"""
@@ -33,6 +35,8 @@ class BBModelConverter:
             self.strategy = StretchConversionStrategy()
         elif mode == "cube":
             self.strategy = SmartCubeConversionStrategy()
+
+        self.strategy.set_converter(self)
         
         print(f"Conversion mode set to: {mode} (with multiple texture manager)")
     
@@ -118,57 +122,119 @@ class BBModelConverter:
         
         return output_file
     
+    def _accumulate_parent_matrix(self, element_uuid: str):
+        """
+        Compose the Blockbench parent chain (root → leaf) for an element.
+        Each group contributes T(O) · R · T(-O), with O=group origin, R=group rotation.
+        Returns a flattened 4*4 row-major list. Never raises on missing data.
+        """
+        # If the hierarchy isn’t ready (or no uuid), just return identity
+        if (
+            not element_uuid
+            or not hasattr(self, "group_info")
+            or not hasattr(self, "element_parent")
+            or self.group_info is None
+            or self.element_parent is None
+        ):
+            return np.eye(4).reshape(-1).tolist()
+
+        # Walk up to root, but be defensive (visited set and max depth)
+        chain = []
+        visited = set()
+        g = self.element_parent.get(element_uuid)
+        depth = 0
+        while g and g not in visited and depth < 512:
+            chain.append(g)
+            visited.add(g)
+            parent = self.group_info.get(g, {}).get("parent")
+            g = parent
+            depth += 1
+
+        # Compose from root → leaf
+        M = np.eye(4)
+        for u in reversed(chain):
+            info = self.group_info.get(u)
+            if not info:
+                # Don’t die on dangling references; skip and keep going
+                print(f"⚠️ Missing group in group_info for UUID {u}; skipping in parent chain.")
+                continue
+
+            origin   = np.array(info.get("origin")   or [0.0, 0.0, 0.0], dtype=float)
+            rotation = np.array(
+                MathUtils.create_rotation_matrix(info.get("rotation") or [0.0, 0.0, 0.0]),
+                dtype=float
+            ).reshape(4, 4)  # your MathUtils uses the Blockbench order
+
+            T_to   = np.eye(4); T_to[:3, 3] = origin
+            T_from = np.eye(4); T_from[:3, 3] = -origin
+
+            # M := M · T(O) · R · T(-O)
+            M = M @ T_to @ rotation @ T_from
+
+        return M.reshape(-1).tolist()
+        
     def _create_bdengine_structure(self, bbmodel_data: Dict[str, Any]) -> Dict[str, Any]:
         """Creates base BDEngine structure with nested groups"""
         structure = self.config.BDENGINE_BASE_STRUCTURE.copy()
         structure["name"] = bbmodel_data.get("name", "Converted Model")
-        
+
+        # initialize once, here
         self.group_mapping = {}
-        
+        self.group_info = {}
+        self.element_parent = {}
+
         outliner = bbmodel_data.get("outliner", [])
         if outliner:
             structure["children"] = self._create_group_hierarchy(outliner)
-        
         return structure
 
-    def _create_group_hierarchy(self, groups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Recursively creates nested group structure, ignoring locators"""
+    def _create_group_hierarchy(self, groups):
+        if not hasattr(self, "group_mapping"):
+            self.group_mapping = {}
+        if not hasattr(self, "group_info"):
+            self.group_info = {}
+        if not hasattr(self, "element_parent"):
+            self.element_parent = {}
+
+
         result = []
-        
         for group in groups:
             if isinstance(group, str):
                 continue
-                
+
+            g_uuid   = group.get("uuid")
+            g_origin = group.get("origin", [0,0,0])
+            g_rot    = group.get("rotation", [0,0,0])
+
             group_struct = {
-                "isCollection": True,
-                "isBackCollection": False,
-                "name": group.get("name", "Group"),
-                "nbt": "",
-                "transforms": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                "isCollection": True, "isBackCollection": False,
+                "name": group.get("name","Group"), "nbt": "",
+                "transforms": [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1],
                 "children": [],
-                "defaultTransform": {
-                    "position": [0, 0, 0],
-                    "rotation": {"x": 0, "y": 0, "z": 0},
-                    "scale": [1, 1, 1]
-                }
+                "defaultTransform": {"position":[0,0,0],"rotation":{"x":0,"y":0,"z":0},"scale":[1,1,1]},
+                "uuid": g_uuid
             }
-            
-            if "uuid" in group:
-                self.group_mapping[group["uuid"]] = group_struct
-            
-            if "children" in group:
-                for child in group["children"]:
-                    if isinstance(child, dict):
-                        if child.get("type") == "locator":
-                            print(f"Skipping locator in group {group.get('name')}: {child.get('name', 'unnamed')}")
-                            continue
-                        nested_groups = self._create_group_hierarchy([child])
-                        group_struct["children"].extend(nested_groups)
-                    else:
-                        self.group_mapping[child] = group_struct
-                        
+
+            if g_uuid:
+                self.group_info[g_uuid] = {"origin": g_origin, "rotation": g_rot, "parent": None}
+                self.group_mapping[g_uuid] = group_struct
+
+            for child in group.get("children", []):
+                if isinstance(child, dict):
+                    if child.get("type") == "locator":  # skip locators
+                        continue
+                    nested = self._create_group_hierarchy([child])
+                    group_struct["children"].extend(nested)
+                    c_uuid = child.get("uuid")
+                    if c_uuid in self.group_info:
+                        self.group_info[c_uuid]["parent"] = g_uuid
+                else:
+                    elem_uuid = child
+                    if g_uuid:
+                        self.element_parent[elem_uuid] = g_uuid
+                    self.group_mapping[elem_uuid] = group_struct
+
             result.append(group_struct)
-            
         return result
 
     def _find_parent_group(self, element_uuid: str) -> Optional[Dict[str, Any]]:

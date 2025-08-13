@@ -58,6 +58,38 @@ class MathUtils:
         rotated_point = rotation_matrix @ point
         
         return rotated_point[0], rotated_point[1], rotated_point[2]
+    
+    @staticmethod
+    def create_rotation_matrix_3x3(rotation: List[float]) -> List[float]:
+        """
+        3x3 (row-major) rotation using the same Blockbench order as create_rotation_matrix.
+        """
+        M4 = MathUtils.create_rotation_matrix(rotation)  # flattens 4x4 row-major (length 16)
+        return [M4[0], M4[1], M4[2],
+                M4[4], M4[5], M4[6],
+                M4[8], M4[9], M4[10]]
+
+    @staticmethod
+    def mul33(a: List[float], b: List[float]) -> List[float]:
+        """
+        Multiply two 3x3 row-major matrices: returns (a · b) as row-major list length 9.
+        """
+        A = np.array(a, dtype=float).reshape(3, 3)
+        B = np.array(b, dtype=float).reshape(3, 3)
+        C = A @ B
+        return C.reshape(-1).tolist()
+
+    @staticmethod
+    def apply_matrix(M: List[float], p: List[float]) -> List[float]:
+        """
+        Apply a 4x4 row-major matrix M to a 3D point p (homogeneous w=1).
+        Returns a 3D list [x', y', z'].
+        """
+        mat = np.array(M, dtype=float).reshape(4, 4)
+        v = np.array([p[0], p[1], p[2], 1.0], dtype=float)
+        out = mat @ v
+        return [float(out[0]), float(out[1]), float(out[2])]
+
 
 class CoordinateConverter:
     """Coordinate converter"""

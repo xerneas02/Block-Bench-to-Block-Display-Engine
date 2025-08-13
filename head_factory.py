@@ -143,6 +143,35 @@ class HeadFactory:
         
         return transforms
     
+    def create_local_head_in_element_frame(self, cube_pos, cube_size,
+                                        element_bottom_corner, element_origin,
+                                        texture=None):
+        cx = element_bottom_corner[0] + cube_pos[0]
+        cy = element_bottom_corner[1] + cube_pos[1]
+        cz = element_bottom_corner[2] + cube_pos[2]
+        w, h, d = cube_size
+        # top-center relative to element origin, then → blocks
+        pos_x = (cx + w*0.5 - element_origin[0]) / 16.0
+        pos_y = (cy + h      - element_origin[1]) / 16.0
+        pos_z = (cz + d*0.5 - element_origin[2]) / 16.0
+
+        sx = max(w / self.config.HEAD_SIZE, self.config.MIN_SCALE)
+        sy = max(h / self.config.HEAD_SIZE, self.config.MIN_SCALE)
+        sz = max(d / self.config.HEAD_SIZE, self.config.MIN_SCALE)
+
+        # identity rotation; column-scaled (basis vectors)
+        transforms = [
+            1*sx, 0*sx, 0*sx, pos_x,
+            0*sy, 1*sy, 0*sy, pos_y,
+            0*sz, 0*sz, 1*sz, pos_z,
+            0,0,0,1
+        ]
+        head = self.config.get_head_base_structure()
+        head["transforms"] = transforms
+        if texture is not None:
+            head["paintTexture"] = texture
+        return head
+    
     def create_textured_head(self, bottom_x: float, bottom_y: float, bottom_z: float,
                            width: float, height: float, depth: float,
                            model_center: List[float], texture_path: str = None,
