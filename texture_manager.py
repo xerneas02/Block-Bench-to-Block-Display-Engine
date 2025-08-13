@@ -2,6 +2,7 @@
 
 import base64
 import io
+import os
 from PIL import Image
 from typing import Dict, Any, List, Tuple, Optional
 
@@ -56,22 +57,39 @@ class MultiTextureManager:
         """Extract texture image from texture data"""
         
         try:
-            source = texture_data.get("source", "")
-            if not source or not source.startswith("data:image"):
+            # Existing decode logic (assumes 'source' (base64) or 'path' keys etc.)
+            source_b64 = texture_data.get("source")
+            path = texture_data.get("path")
+            img = None
+
+            if source_b64:
+                import base64, io
+                raw = base64.b64decode(source_b64.split(",")[-1])
+                img = Image.open(io.BytesIO(raw))
+            elif path and os.path.exists(path):
+                img = Image.open(path)
+            else:
                 return None
-            
-            header, encoded = source.split(',', 1)
-            image_data = base64.b64decode(encoded)
-            
-            texture_image = Image.open(io.BytesIO(image_data))
-            
-            if texture_image.mode != 'RGBA':
-                texture_image = texture_image.convert('RGBA')
-            
-            return texture_image
-            
+
+            if img.mode != "RGBA":
+                img = img.convert("RGBA")
+
+            # Replace fully transparent pixels with opaque black
+            px = img.load()
+            w, h = img.size
+            changed = False
+            for y in range(h):
+                for x in range(w):
+                    r, g, b, a = px[x, y]
+                    if a == 0:
+                        px[x, y] = (0, 0, 0, 255)
+                        changed = True
+            if changed:
+                print(f"  Transparent → black applied on texture id={texture_data.get('id')} size={w}x{h}")
+
+            return img
         except Exception as e:
-            print(f"Error extracting texture: {e}")
+            print(f"  Error extracting texture: {e}")
             return None
     
     def get_element_texture_ids(self, element: Dict[str, Any]) -> List[int]:
