@@ -150,7 +150,7 @@ class HeadFactory:
         cy = element_bottom_corner[1] + cube_pos[1]
         cz = element_bottom_corner[2] + cube_pos[2]
         w, h, d = cube_size
-        # top-center relative to element origin, then → blocks
+
         pos_x = (cx + w*0.5 - element_origin[0]) / 16.0
         pos_y = (cy + h      - element_origin[1]) / 16.0
         pos_z = (cz + d*0.5 - element_origin[2]) / 16.0
@@ -159,7 +159,6 @@ class HeadFactory:
         sy = max(h / self.config.HEAD_SIZE, self.config.MIN_SCALE)
         sz = max(d / self.config.HEAD_SIZE, self.config.MIN_SCALE)
 
-        # identity rotation; column-scaled (basis vectors)
         transforms = [
             1*sx, 0*sx, 0*sx, pos_x,
             0*sy, 1*sy, 0*sy, pos_y,
@@ -230,7 +229,6 @@ class HeadFactory:
         top_center_y = cube_y + cube_h
         top_center_z = cube_z + cube_d * 0.5
 
-        # Local (pre-rotation) offset relative to origin, converted to head units (blocks)
         local_tx = (top_center_x - element_origin[0]) / 16.0
         local_ty = (top_center_y - element_origin[1]) / 16.0
         local_tz = (top_center_z - element_origin[2]) / 16.0

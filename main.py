@@ -29,7 +29,6 @@ class UserInterface:
             return
         
         if isinstance(bbmodel_selection, list):
-            # Convert all files in the list
             print(f"Converting {len(bbmodel_selection)} files in mode '{mode}'...")
             for file in bbmodel_selection:
                 try:
@@ -40,7 +39,6 @@ class UserInterface:
                     traceback.print_exc()
                     print(f"   ❌ Conversion error for {file}: {e}")
         else:
-            # Convert a single file
             print(f"Selected file: {bbmodel_selection}")
             print(f"Mode used: {mode}")
             print()
@@ -76,7 +74,7 @@ class UserInterface:
             try:
                 choice = int(input("Choose a file (number): "))
                 if choice == 0:
-                    return bbmodel_files  # return list to signal "convert all"
+                    return bbmodel_files
                 elif 1 <= choice <= len(bbmodel_files):
                     return bbmodel_files[choice - 1]
                 else:

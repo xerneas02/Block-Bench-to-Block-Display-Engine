@@ -57,7 +57,6 @@ class MultiTextureManager:
         """Extract texture image from texture data"""
         
         try:
-            # Existing decode logic (assumes 'source' (base64) or 'path' keys etc.)
             source_b64 = texture_data.get("source")
             path = texture_data.get("path")
             img = None
@@ -74,7 +73,6 @@ class MultiTextureManager:
             if img.mode != "RGBA":
                 img = img.convert("RGBA")
 
-            # Replace fully transparent pixels with opaque black
             px = img.load()
             w, h = img.size
             changed = False

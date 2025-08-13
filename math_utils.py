@@ -64,7 +64,7 @@ class MathUtils:
         """
         3x3 (row-major) rotation using the same Blockbench order as create_rotation_matrix.
         """
-        M4 = MathUtils.create_rotation_matrix(rotation)  # flattens 4x4 row-major (length 16)
+        M4 = MathUtils.create_rotation_matrix(rotation)
         return [M4[0], M4[1], M4[2],
                 M4[4], M4[5], M4[6],
                 M4[8], M4[9], M4[10]]

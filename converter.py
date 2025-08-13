@@ -53,7 +53,7 @@ class BBModelConverter:
             raise RuntimeError(f"Error reading {bbmodel_file}: {e}")
         
         if texture_file and os.path.exists(texture_file):
-            pass  # (existing external texture logic)
+            pass
         
         try:
             all_textures = self.texture_manager.extract_all_textures(bbmodel_data)
@@ -76,13 +76,12 @@ class BBModelConverter:
         if not all_textures:
             print("Warning: no textures extracted (will use default head texture)")
         
-        total_heads = 0          # Actual number of heads (item displays)
-        total_groups = 0         # Number of grouped subdivision collections
+        total_heads = 0
+        total_groups = 0
         elements = bbmodel_data.get("elements", [])
         
         valid_elements = []
         for element in elements:
-            # Skip locator elements (Blockbench uses 'locator' or empty faces)
             if element.get("type") == "locator":
                 continue
             valid_elements.append(element)
@@ -91,7 +90,7 @@ class BBModelConverter:
         
         for i, element in enumerate(valid_elements):
             print(f"\n[{i+1}/{len(valid_elements)}] Element: {element.get('name','(unnamed)')}")
-            # Convert element using texture-aware path
+
             produced_nodes = self._convert_element_with_textures(
                 element,
                 model_center,
@@ -100,16 +99,14 @@ class BBModelConverter:
             if not produced_nodes:
                 continue
             
-            # Attach produced nodes to root (or parent group if hierarchy later)
             parent_group = self._find_parent_group(element.get("uuid", ""))
             target_children = parent_group["children"] if parent_group else bdengine_structure["children"]
             target_children.extend(produced_nodes)
             
-            # Count actual heads
             for node in produced_nodes:
                 if node.get("isCollection") and node.get("_grouped_subdivision"):
                     total_groups += 1
-                    # Count only direct children that are heads
+
                     child_heads = sum(1 for c in node.get("children", []) if c.get("isItemDisplay"))
                     total_heads += child_heads
                 elif node.get("isItemDisplay"):
@@ -128,7 +125,6 @@ class BBModelConverter:
         Each group contributes T(O) · R · T(-O), with O=group origin, R=group rotation.
         Returns a flattened 4*4 row-major list. Never raises on missing data.
         """
-        # If the hierarchy isn’t ready (or no uuid), just return identity
         if (
             not element_uuid
             or not hasattr(self, "group_info")
@@ -138,7 +134,6 @@ class BBModelConverter:
         ):
             return np.eye(4).reshape(-1).tolist()
 
-        # Walk up to root, but be defensive (visited set and max depth)
         chain = []
         visited = set()
         g = self.element_parent.get(element_uuid)
@@ -150,12 +145,10 @@ class BBModelConverter:
             g = parent
             depth += 1
 
-        # Compose from root → leaf
         M = np.eye(4)
         for u in reversed(chain):
             info = self.group_info.get(u)
             if not info:
-                # Don’t die on dangling references; skip and keep going
                 print(f"⚠️ Missing group in group_info for UUID {u}; skipping in parent chain.")
                 continue
 
@@ -163,12 +156,11 @@ class BBModelConverter:
             rotation = np.array(
                 MathUtils.create_rotation_matrix(info.get("rotation") or [0.0, 0.0, 0.0]),
                 dtype=float
-            ).reshape(4, 4)  # your MathUtils uses the Blockbench order
+            ).reshape(4, 4)
 
             T_to   = np.eye(4); T_to[:3, 3] = origin
             T_from = np.eye(4); T_from[:3, 3] = -origin
 
-            # M := M · T(O) · R · T(-O)
             M = M @ T_to @ rotation @ T_from
 
         return M.reshape(-1).tolist()
@@ -178,7 +170,6 @@ class BBModelConverter:
         structure = self.config.BDENGINE_BASE_STRUCTURE.copy()
         structure["name"] = bbmodel_data.get("name", "Converted Model")
 
-        # initialize once, here
         self.group_mapping = {}
         self.group_info = {}
         self.element_parent = {}
@@ -221,7 +212,7 @@ class BBModelConverter:
 
             for child in group.get("children", []):
                 if isinstance(child, dict):
-                    if child.get("type") == "locator":  # skip locators
+                    if child.get("type") == "locator":
                         continue
                     nested = self._create_group_hierarchy([child])
                     group_struct["children"].extend(nested)

@@ -78,7 +78,6 @@ class SmartCubeConversionStrategy(ConversionStrategy):
             element, source_texture_size, all_textures
         )
 
-        # texture subdivision
         if all_textures is not None:
             print("🎨 Texture subdivision with individual textures")
             cube_textures = self.texture_subdivider.subdivide_texture_for_cubes_with_individual_textures(
@@ -92,7 +91,6 @@ class SmartCubeConversionStrategy(ConversionStrategy):
         else:
             cube_textures = [texture] * len(cube_divisions)
 
-        # Always group: we want rotations on the collection, not on the heads
         element_bottom_corner = (info['bottom_x'], info['bottom_y'], info['bottom_z'])
         element_origin = element.get('origin', [
             info['bottom_x'] + info['width'] / 2,
@@ -100,20 +98,16 @@ class SmartCubeConversionStrategy(ConversionStrategy):
             info['bottom_z'] + info['depth'] / 2
         ])
 
-        # —— group transform = (parent chain) * (element rotation) at (parent chain applied to origin) ——
-        # 4×4 parent chain matrix (you added this on BBModelConverter)
         parent_M = self.converter._accumulate_parent_matrix(element.get("uuid")) if self.converter else [
             1,0,0,0,  0,1,0,0,  0,0,1,0,  0,0,0,1
         ]
 
-        # 3×3 parent rotation block
         parent_R = [
             parent_M[0], parent_M[1], parent_M[2],
             parent_M[4], parent_M[5], parent_M[6],
             parent_M[8], parent_M[9], parent_M[10]
         ]
 
-        # 3×3 element rotation (use your MathUtils order)
         elem_M4 = MathUtils.create_rotation_matrix(info['rotation'])
         elem_R = [
             elem_M4[0], elem_M4[1], elem_M4[2],
@@ -121,10 +115,8 @@ class SmartCubeConversionStrategy(ConversionStrategy):
             elem_M4[8], elem_M4[9], elem_M4[10]
         ]
 
-        # compose in matrix space
         R_group = self.head_factory.math_utils.mul33(parent_R, elem_R)
 
-        # parent the element origin to world, then to BDE blocks
         origin_world = self.head_factory.math_utils.apply_matrix(parent_M, [element_origin[0], element_origin[1], element_origin[2]])
         pos_x = (origin_world[0] - model_center[0]) / 16.0
         pos_y = (origin_world[1] - model_center[1]) / 16.0
@@ -142,7 +134,6 @@ class SmartCubeConversionStrategy(ConversionStrategy):
             "_grouped_subdivision": True
         }
 
-        # child heads: axis-aligned in element space, positioned relative to element origin
         for i, division in enumerate(cube_divisions):
             print(f"  Cube {i+1}: pos={division['position']}, size={division['size']}")
             current_texture = cube_textures[i] if i < len(cube_textures) and cube_textures[i] else texture
