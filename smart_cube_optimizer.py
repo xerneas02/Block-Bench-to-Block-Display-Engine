@@ -94,7 +94,7 @@ class SmartCubeOptimizer:
             if fname in ("north","south"):
                 upd("x", step_u); upd("y", step_v)
             elif fname in ("east","west"):
-                upd("z", step_u); upd("y", step_v)
+                upd("x", step_u); upd("y", step_v)
             elif fname in ("up","down"):
                 upd("x", step_u); upd("z", step_v)
 
@@ -104,21 +104,29 @@ class SmartCubeOptimizer:
         """
         Take existing divisions on one axis and, if we have a step hint (units per ~8px),
         split those chunks into near-multiples of that step to follow stretched UVs.
+        Also coalesce into the hinted step if the total is close to an integer multiple.
         """
         if step_hint is None or step_hint <= 0:
             return base_divs
 
+        cand = max(1.0, round(step_hint))
+
+        m = max(1, round(total / cand))
+        if abs(total - m * cand) < 0.15:
+            return [cand] * m
+
         out = []
         for seg in base_divs:
             remaining = seg
-            cand = max(1.0, round(step_hint))
             while remaining > 1e-6:
                 step = min(cand, remaining)
                 out.append(step)
                 remaining -= step
+
         if abs(sum(out) - sum(base_divs)) > 1e-6:
             out[-1] += (sum(base_divs) - sum(out))
         return out
+
 
     
     def calculate_optimal_3d_decomposition(self, width: float, height: float, depth: float,
